@@ -34,6 +34,23 @@ function TenantList() {
 }
 ```
 
+## Server-side rendering
+
+`@magic-use-case/solid` ships two bundles: `dist/index.js` compiled with Solid's
+DOM generator, and `dist/server.js` compiled with its SSR generator. The exports
+map routes `node`, `deno`, and `worker` to the server build automatically, so
+`renderToString` works with no configuration.
+
+> [!WARNING]
+> **Application state is currently process-global, not request-scoped.**
+> `UseCase` holds its state in a `static` field and the event bus is a module
+> singleton. In a browser — one process per user — that is fine. On a server,
+> every concurrent request shares them, so one user's state can be read while
+> rendering another user's page.
+>
+> Rendering markup works today. Do not use a shared server process to render
+> per-user state until state is request-scoped (e.g. via `AsyncLocalStorage`).
+
 ## Repository layout
 
 ```

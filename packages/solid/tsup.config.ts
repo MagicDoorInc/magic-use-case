@@ -2,21 +2,26 @@ import { defineConfig } from 'tsup';
 import * as preset from 'tsup-preset-solid';
 
 // Solid's JSX must be compiled by babel-preset-solid (the preset's esbuild:solid
-// plugin), not by esbuild's generic JSX transform — otherwise the output is React
-// -shaped and not fine-grained reactive.
+// plugin), not esbuild's generic JSX transform — otherwise the output is
+// React-shaped rather than fine-grained reactive.
+//
+// `server_entry` produces a second bundle compiled with Solid's SSR generator.
+// The exports map in package.json routes node/deno/worker to dist/server.js and
+// browsers to dist/index.js.
 const parsed = preset.parsePresetOptions({
-  entries: { entry: 'src/index.ts' },
+  entries: [{ entry: 'src/index.ts', server_entry: true }],
   cjs: false,
 });
 
 export default defineConfig(() =>
   preset.generateTsupOptions(parsed).map((options) => ({
     ...options,
-    // Inline the private core package into the bundle. `dts.resolve` is required
-    // as well — without it the emitted .d.ts keeps a dangling type import to
-    // @magic-use-case/core, which consumers cannot install.
+    // Inline the private core package into every bundle.
     noExternal: ['@magic-use-case/core'],
     external: ['solid-js', 'solid-js/store', 'solid-js/web'],
-    dts: { resolve: ['@magic-use-case/core'] },
+    // Only the client config emits types; `resolve` is required so the emitted
+    // .d.ts inlines core's types instead of leaving a dangling import to a
+    // package consumers cannot install.
+    ...(options.dts ? { dts: { resolve: ['@magic-use-case/core'] } } : {}),
   })),
 );

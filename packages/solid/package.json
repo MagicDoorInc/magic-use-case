@@ -3,12 +3,42 @@
   "version": "0.1.0",
   "description": "SolidJS bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/server.js",
+  "module": "./dist/server.js",
   "types": "./dist/index.d.ts",
+  "browser": {
+    "./dist/server.js": "./dist/index.js"
+  },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "worker": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/server.js"
+        }
+      },
+      "browser": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        }
+      },
+      "deno": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/server.js"
+        }
+      },
+      "node": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/server.js"
+        }
+      },
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./package.json": "./package.json"
   },

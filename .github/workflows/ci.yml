@@ -15,24 +15,44 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # build first: the adapters resolve core's types from packages/core/dist,
+      # so type-check cannot run against a clean tree until core is built.
+      - run: npm run build
       - run: npm run type-check
       - run: npm run lint
-      - run: npm run build
       - run: npm test
 
       # Guard the core boundary: the published bundles must never reference the
       # private core package, and core must never be publishable.
       - name: Assert core is not leaked into published output
         run: |
-          for pkg in solid react; do
-            for f in packages/$pkg/dist/index.js packages/$pkg/dist/index.d.ts; do
-              if grep -q "@magic-use-case/core" "$f"; then
-                echo "::error::$f leaks a reference to the private core package"
-                exit 1
-              fi
-            done
+          for f in packages/solid/dist/index.js \
+                   packages/solid/dist/server.js \
+                   packages/solid/dist/index.d.ts \
+                   packages/react/dist/index.js \
+                   packages/react/dist/index.d.ts; do
+            if grep -q "@magic-use-case/core" "$f"; then
+              echo "::error::$f leaks a reference to the private core package"
+              exit 1
+            fi
           done
           node -e "
             const p = require('./packages/core/package.json');
             if (p.private !== true) { console.error('core must stay private'); process.exit(1); }
           "
+
+      # The published tarballs must carry only build output — never src, config,
+      # or an .npmrc.
+      - name: Assert tarball contents
+        run: |
+          for pkg in solid react; do
+            # --ignore-scripts: dist/ is already built above, and prepack's
+            # tsup output would otherwise pollute the --json stdout.
+            files=$(npm pack --workspace @magic-use-case/$pkg --dry-run --json --ignore-scripts \
+              | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)[0].files.map(f=>f.path).join('\n')))")
+            echo "$pkg ships:"; echo "$files"
+            if echo "$files" | grep -vqE '^(dist/|package.json$|README.md$|LICENSE$)'; then
+              echo "::error::@magic-use-case/$pkg tarball contains unexpected files"
+              exit 1
+            fi
+          done
