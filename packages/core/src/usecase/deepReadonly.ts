@@ -1,4 +1,4 @@
-const READONLY = Symbol('readonly');
+import { isMutationWindowOpen } from './mutationWindow';
 
 const mutatingMapMethods = new Set(['set', 'delete', 'clear']);
 const mutatingSetMethods = new Set(['add', 'delete', 'clear']);
@@ -14,44 +14,81 @@ type DeepReadonly<T> =
   T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } :
   T;
 
-const proxyCache = new WeakMap<object, object>();
+/**
+ * Both wrappers below are the same deep proxy over application state; they
+ * differ only in when a write is permitted. `READONLY` never permits one — it
+ * is the view handed to presenters. `USE_CASE` permits writes only while a use
+ * case is running, and is what `getState()` returns.
+ */
+interface Policy {
+  marker: symbol;
+  cache: WeakMap<object, object>;
+  /** Prefixes the collection name in messages, e.g. "readonly Array". */
+  label: string;
+  allows(): boolean;
+  reject(action: string): never;
+}
+
+const READONLY: Policy = {
+  marker: Symbol('readonly'),
+  cache: new WeakMap<object, object>(),
+  label: 'readonly ',
+  allows: () => false,
+  reject(action) {
+    throw new Error(`Cannot ${action} on readonly object`);
+  },
+};
+
+const USE_CASE: Policy = {
+  marker: Symbol('useCaseWritable'),
+  cache: new WeakMap<object, object>(),
+  label: '',
+  allows: isMutationWindowOpen,
+  reject(action) {
+    throw new Error(
+      `[magic-use-case] Cannot ${action} outside a use case.\n\n` +
+        'Application state may only be mutated from within a running use case, ' +
+        'so that every change emits a state-change event and reaches the UI. ' +
+        'Mutating it elsewhere would leave presenters showing stale data.\n\n' +
+        'Move this write into a use case\'s runLogic().',
+    );
+  },
+};
 
 function isObject(value: unknown): value is object {
   return value !== null && typeof value === 'object';
 }
 
-function throwReadonly(action: string): never {
-  throw new Error(`Cannot ${action} on readonly object`);
+function wrap(value: unknown, policy: Policy): unknown {
+  return isObject(value) ? proxyFor(value, policy) : value;
 }
 
-function wrapValue(value: unknown): unknown {
-  return isObject(value) ? deepReadonly(value) : value;
-}
-
-function createMapProxy(target: Map<unknown, unknown>): Map<unknown, unknown> {
+function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unknown, unknown> {
   return new Proxy(target, {
     get(target, prop, receiver) {
-      if (prop === READONLY) return true;
+      if (prop === policy.marker) return true;
 
       if (typeof prop === 'string' && mutatingMapMethods.has(prop)) {
-        return () => throwReadonly(`call .${prop}() on readonly Map`);
+        if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Map`);
+        const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
+        return method.bind(target);
       }
 
       if (prop === 'get') {
-        return (key: unknown) => wrapValue(target.get(key));
+        return (key: unknown) => wrap(target.get(key), policy);
       }
 
       if (prop === 'forEach') {
         return (cb: (value: unknown, key: unknown, map: Map<unknown, unknown>) => void) =>
-          target.forEach((v, k) => cb(wrapValue(v), k, receiver));
+          target.forEach((v, k) => cb(wrap(v, policy), k, receiver));
       }
 
       if (iteratorKeys.has(prop)) {
         return function* () {
           if (prop === 'values') {
-            for (const v of target.values()) yield wrapValue(v);
+            for (const v of target.values()) yield wrap(v, policy);
           } else {
-            for (const [k, v] of target.entries()) yield [k, wrapValue(v)];
+            for (const [k, v] of target.entries()) yield [k, wrap(v, policy)];
           }
         };
       }
@@ -59,74 +96,116 @@ function createMapProxy(target: Map<unknown, unknown>): Map<unknown, unknown> {
       const value = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-    set(_, prop) { throwReadonly(`set property '${String(prop)}'`); },
-    deleteProperty(_, prop) { throwReadonly(`delete property '${String(prop)}'`); },
-    defineProperty(_, prop) { throwReadonly(`define property '${String(prop)}'`); },
+    set(target, prop, value) {
+      if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
+      return Reflect.set(target, prop, value);
+    },
+    deleteProperty(target, prop) {
+      if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
+      return Reflect.deleteProperty(target, prop);
+    },
+    defineProperty(target, prop, attributes) {
+      if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
+      return Reflect.defineProperty(target, prop, attributes);
+    },
   });
 }
 
-function createSetProxy(target: Set<unknown>): Set<unknown> {
+function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
   return new Proxy(target, {
     get(target, prop, receiver) {
-      if (prop === READONLY) return true;
+      if (prop === policy.marker) return true;
 
       if (typeof prop === 'string' && mutatingSetMethods.has(prop)) {
-        return () => throwReadonly(`call .${prop}() on readonly Set`);
+        if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Set`);
+        const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
+        return method.bind(target);
       }
 
       if (iteratorKeys.has(prop)) {
         return function* () {
-          for (const v of target.values()) yield wrapValue(v);
+          for (const v of target.values()) yield wrap(v, policy);
         };
       }
 
       if (prop === 'forEach') {
         return (cb: (value: unknown, key: unknown, set: Set<unknown>) => void) =>
-          target.forEach((v) => cb(wrapValue(v), wrapValue(v), receiver));
+          target.forEach((v) => cb(wrap(v, policy), wrap(v, policy), receiver));
       }
 
       const value = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
-    set(_, prop) { throwReadonly(`set property '${String(prop)}'`); },
-    deleteProperty(_, prop) { throwReadonly(`delete property '${String(prop)}'`); },
-    defineProperty(_, prop) { throwReadonly(`define property '${String(prop)}'`); },
+    set(target, prop, value) {
+      if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
+      return Reflect.set(target, prop, value);
+    },
+    deleteProperty(target, prop) {
+      if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
+      return Reflect.deleteProperty(target, prop);
+    },
+    defineProperty(target, prop, attributes) {
+      if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
+      return Reflect.defineProperty(target, prop, attributes);
+    },
   });
 }
 
-function createObjectProxy(target: object): object {
+function createObjectProxy(target: object, policy: Policy): object {
   return new Proxy(target, {
     get(target, prop, receiver) {
-      if (prop === READONLY) return true;
+      if (prop === policy.marker) return true;
 
       if (Array.isArray(target) && typeof prop === 'string' && mutatingArrayMethods.has(prop)) {
-        return () => throwReadonly(`call .${prop}() on readonly Array`);
+        if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Array`);
+        const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
+        return method.bind(target);
       }
 
       const value = Reflect.get(target, prop, receiver);
-      return isObject(value) ? deepReadonly(value) : value;
+      return isObject(value) ? proxyFor(value, policy) : value;
     },
-    set(_, prop) { throwReadonly(`set property '${String(prop)}'`); },
-    deleteProperty(_, prop) { throwReadonly(`delete property '${String(prop)}'`); },
-    defineProperty(_, prop) { throwReadonly(`define property '${String(prop)}'`); },
+    set(target, prop, value) {
+      if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
+      return Reflect.set(target, prop, value);
+    },
+    deleteProperty(target, prop) {
+      if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
+      return Reflect.deleteProperty(target, prop);
+    },
+    defineProperty(target, prop, attributes) {
+      if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
+      return Reflect.defineProperty(target, prop, attributes);
+    },
   });
 }
 
-export function deepReadonly<T extends object>(obj: T): DeepReadonly<T> {
-  if (obj === null || typeof obj !== 'object') return obj as DeepReadonly<T>;
-  if ((obj as Record<symbol, unknown>)[READONLY]) return obj as DeepReadonly<T>;
-  if (proxyCache.has(obj)) return proxyCache.get(obj) as DeepReadonly<T>;
+function proxyFor<T extends object>(obj: T, policy: Policy): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if ((obj as Record<symbol, unknown>)[policy.marker]) return obj;
+
+  const cached = policy.cache.get(obj);
+  if (cached) return cached as T;
 
   let proxy: object;
-
   if (obj instanceof Map) {
-    proxy = createMapProxy(obj as Map<unknown, unknown>);
+    proxy = createMapProxy(obj as Map<unknown, unknown>, policy);
   } else if (obj instanceof Set) {
-    proxy = createSetProxy(obj as Set<unknown>);
+    proxy = createSetProxy(obj as Set<unknown>, policy);
   } else {
-    proxy = createObjectProxy(obj);
+    proxy = createObjectProxy(obj, policy);
   }
 
-  proxyCache.set(obj, proxy);
-  return proxy as DeepReadonly<T>;
+  policy.cache.set(obj, proxy);
+  return proxy as T;
+}
+
+/** The view handed to presenters: never writable. */
+export function deepReadonly<T extends object>(obj: T): DeepReadonly<T> {
+  return proxyFor(obj, READONLY) as DeepReadonly<T>;
+}
+
+/** The view returned by `getState()`: writable only while a use case runs. */
+export function useCaseWritable<T extends object>(obj: T): T {
+  return proxyFor(obj, USE_CASE);
 }

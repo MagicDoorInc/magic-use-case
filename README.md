@@ -20,10 +20,14 @@ npm install @magic-use-case/react   # or @magic-use-case/solid
 ```tsx
 import { UseCase, Presenter, useUseCase, usePresenter } from '@magic-use-case/react';
 
-class LoadTenants extends UseCase<TenantState> {
+class LoadTenants extends UseCase<AppState> {
+  protected async isAppStateInitialized() { return this.initialized; }
+  protected async initializeState() { return new AppState(); }
+
   protected async runLogic() {
-    const tenants = await api.getTenants();
-    this.setState({ tenants });
+    // Application state is mutated in place, and only here: writes outside a
+    // running use case throw.
+    this.getState().tenants = await api.getTenants();
   }
 }
 
@@ -33,6 +37,31 @@ function TenantList() {
   // ...
 }
 ```
+
+## State may only be mutated inside a use case
+
+`getState()` returns a deep proxy that accepts writes only while a use case is
+running. Anywhere else — a component, a presenter, a module holding a reference —
+the write throws:
+
+```
+[magic-use-case] Cannot call .push() on Array outside a use case.
+```
+
+This exists because a write made outside a use case emits no state-change event,
+so presenters keep rendering stale data. That is a silent desync; the guard turns
+it into an error at the offending line. Presenters separately receive a fully
+readonly view, so the UI cannot write at all.
+
+Two limits are worth knowing:
+
+- **The object you return from `initializeState()` stays writable.** You
+  constructed it, so you hold an unproxied reference, and writes through it are
+  invisible to the guard. Hand it to the library and read it back via
+  `getState()` rather than keeping the reference around.
+- **The window is time-based, not call-based.** While a use case awaits, any
+  code that happens to run is inside the window and may write. The guard catches
+  mistakes; it is not a security boundary.
 
 ## Server-side rendering
 

@@ -1,6 +1,7 @@
-import { deepReadonly } from './deepReadonly';
+import { deepReadonly, useCaseWritable } from './deepReadonly';
 import { type EventEmitter, eventEmitter } from './eventEmitter';
 import { assertNotOnServer } from './serverGuard';
+import { withMutationWindow } from './mutationWindow';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type UseCaseClass<T> = new (...args: any[]) => UseCase<T>;
@@ -70,7 +71,7 @@ export abstract class UseCase<T> {
 
   protected getState(): T {
     assertNotOnServer('Reading use case state');
-    return UseCase.state as T;
+    return useCaseWritable(UseCase.state as object) as T;
   }
 
   protected navigate(url: string) {
@@ -82,7 +83,7 @@ export abstract class UseCase<T> {
   protected abstract initializeState(): Promise<T>;
 
   protected async runWithUpdate(functionToRun: () => Promise<void>): Promise<void> {
-    await functionToRun();
+    await withMutationWindow(functionToRun);
     this.eventEmitter?.emitStateChange(deepReadonly(UseCase.state as object));
   }
 }
