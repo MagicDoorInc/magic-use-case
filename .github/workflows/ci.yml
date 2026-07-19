@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+
+      # Guard the core boundary: the published bundles must never reference the
+      # private core package, and core must never be publishable.
+      - name: Assert core is not leaked into published output
+        run: |
+          for pkg in solid react; do
+            for f in packages/$pkg/dist/index.js packages/$pkg/dist/index.d.ts; do
+              if grep -q "@magic-use-case/core" "$f"; then
+                echo "::error::$f leaks a reference to the private core package"
+                exit 1
+              fi
+            done
+          done
+          node -e "
+            const p = require('./packages/core/package.json');
+            if (p.private !== true) { console.error('core must stay private'); process.exit(1); }
+          "

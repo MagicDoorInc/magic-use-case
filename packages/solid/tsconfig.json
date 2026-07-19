@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["solid-js"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src"]
+}

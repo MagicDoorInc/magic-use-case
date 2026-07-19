@@ -1,0 +1,55 @@
+{
+  "name": "@magic-use-case/solid",
+  "version": "0.1.0",
+  "description": "SolidJS bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "type-check": "tsc --project typecheckconfig.json",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "solid-js": ">1.9.3"
+  },
+  "devDependencies": {
+    "@magic-use-case/core": "*",
+    "eslint-plugin-solid": "^0.14.5",
+    "solid-js": "^1.9.3",
+    "tsup-preset-solid": "^2.2.0"
+  },
+  "keywords": [
+    "solidjs",
+    "use-case",
+    "clean-architecture",
+    "presenter",
+    "state-management"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MagicDoorInc/magic-use-case.git",
+    "directory": "packages/solid"
+  },
+  "homepage": "https://github.com/MagicDoorInc/magic-use-case#readme",
+  "bugs": {
+    "url": "https://github.com/MagicDoorInc/magic-use-case/issues"
+  },
+  "author": "Norbert Nemes",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
