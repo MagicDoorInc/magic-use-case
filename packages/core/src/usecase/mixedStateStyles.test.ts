@@ -25,9 +25,6 @@ describe('in-place and immutable styles coexist', () => {
     const state = new AppState();
 
     class DoBoth extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }
@@ -61,9 +58,6 @@ describe('in-place and immutable styles coexist', () => {
     const state = new AppState();
 
     class Escape extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }

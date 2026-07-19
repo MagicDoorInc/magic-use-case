@@ -20,9 +20,6 @@ describe('state mutation is confined to use cases', () => {
     const { UseCase } = await load();
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -47,9 +44,6 @@ describe('state mutation is confined to use cases', () => {
     const { UseCase } = await load();
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -75,9 +69,6 @@ describe('state mutation is confined to use cases', () => {
     const { UseCase } = await load();
 
     class Failing extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -102,9 +93,6 @@ describe('state mutation is confined to use cases', () => {
     let innerRan = false;
 
     class Inner extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return true;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -114,9 +102,6 @@ describe('state mutation is confined to use cases', () => {
     }
 
     class Outer extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -144,9 +129,6 @@ describe('state mutation is confined to use cases', () => {
     const original = new AppState();
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return original;
       }
@@ -174,9 +156,6 @@ describe('state mutation is confined to use cases', () => {
     let live: AppState | undefined;
 
     class Slow extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return new AppState();
       }

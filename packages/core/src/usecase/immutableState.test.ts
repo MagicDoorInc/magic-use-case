@@ -47,9 +47,6 @@ describe('immutable state patterns', () => {
     const state = new AppState();
 
     class AddTenant extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }
@@ -77,9 +74,6 @@ describe('immutable state patterns', () => {
     const state = new AppState();
 
     class Noop extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }

@@ -34,7 +34,10 @@ export abstract class UseCase<T> {
     // not be captured and reported as a failed execution.
     assertNotOnServer('Executing a use case');
     try {
-      if (!this.isAppStateInitialized()) {
+      // Bootstrap exactly once. Core owns this decision: a subclass cannot
+      // force a re-initialization and silently replace live state. Clearing
+      // state is what `resetAppState()` is for.
+      if (UseCase.state === undefined) {
         if (!UseCase.initialStatePromise) {
           UseCase.initialStatePromise = this.initializeState().then((state) => {
             // Adopted, not borrowed: the caller keeps their object, but it is
@@ -98,7 +101,6 @@ export abstract class UseCase<T> {
     this.eventEmitter?.emitNavigation(url);
   }
 
-  protected abstract isAppStateInitialized(): boolean;
   protected abstract runLogic(params: unknown): Promise<void>;
   protected abstract initializeState(): Promise<T>;
 

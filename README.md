@@ -20,10 +20,12 @@ npm install @magic-use-case/react   # or @magic-use-case/solid
 ```tsx
 import { UseCase, Presenter, useUseCase, usePresenter } from '@magic-use-case/react';
 
-class LoadTenants extends UseCase<AppState> {
-  protected async isAppStateInitialized() { return this.initialized; }
+// One base class per app supplies the initial state; every use case extends it.
+abstract class AppUseCase extends UseCase<AppState> {
   protected async initializeState() { return new AppState(); }
+}
 
+class LoadTenants extends AppUseCase {
   protected async runLogic() {
     // Application state is mutated in place, and only here: writes outside a
     // running use case throw.
@@ -89,6 +91,17 @@ replacement yields a new reference, so reference comparison is enough.
 
 The root object itself stays stable either way: it is adopted once from
 `initializeState()`, and there is no API to swap it wholesale.
+
+### Bootstrapping
+
+`initializeState()` is declared on `UseCase` but called exactly once per app
+run — by whichever use case executes first. Put it on a single base class that
+every use case extends, and you write it once.
+
+Core decides when to bootstrap, by checking whether state exists. A use case
+cannot force a re-initialization and replace live state; concurrent first
+executions bootstrap once between them. `resetAppState()` is the only way back
+to an uninitialized state.
 
 ### Resetting state
 

@@ -28,9 +28,6 @@ describe('server guard', () => {
     enableServerGuard();
 
     class Load extends UseCase<{ v: number }> {
-      protected isAppStateInitialized() {
-        return true;
-      }
       protected async initializeState() {
         return { v: 1 };
       }
@@ -61,9 +58,6 @@ describe('server guard', () => {
     const { Presenter } = await import('../ui/Presenter');
 
     class Load extends UseCase<{ v: number }> {
-      protected isAppStateInitialized() {
-        return true;
-      }
       protected async initializeState() {
         return { v: 1 };
       }

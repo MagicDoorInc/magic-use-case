@@ -23,9 +23,6 @@ describe('presenters cannot modify application state', () => {
     const attempts: string[] = [];
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }
@@ -73,9 +70,6 @@ describe('presenters cannot modify application state', () => {
     const observations: Array<{ windowOpen: boolean; writeAllowed: boolean }> = [];
 
     class Inner extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return true;
-      }
       protected async initializeState() {
         return state;
       }
@@ -85,9 +79,6 @@ describe('presenters cannot modify application state', () => {
     }
 
     class Outer extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }
@@ -133,9 +124,6 @@ describe('presenters cannot modify application state', () => {
     let model: { tenants: string[] } | undefined;
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }
@@ -172,9 +160,6 @@ describe('presenters cannot modify application state', () => {
     const state = new AppState();
 
     class Load extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return false;
-      }
       protected async initializeState() {
         return state;
       }

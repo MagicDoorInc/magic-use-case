@@ -21,9 +21,6 @@ describe('resetAppState', () => {
     let bootstraps = 0;
 
     class Base extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return this.getState() !== undefined;
-      }
       protected async initializeState() {
         bootstraps += 1;
         return new AppState(`boot-${bootstraps}`);
@@ -56,9 +53,6 @@ describe('resetAppState', () => {
     const seen: Array<string | undefined> = [];
 
     class Base extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return this.getState() !== undefined;
-      }
       protected async initializeState() {
         return new AppState('before-reset');
       }
@@ -90,9 +84,6 @@ describe('resetAppState', () => {
     const models: Array<string | undefined> = [];
 
     class Base extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return this.getState() !== undefined;
-      }
       protected async initializeState() {
         return new AppState('live');
       }
@@ -124,9 +115,6 @@ describe('resetAppState', () => {
     let runs = 0;
 
     class Base extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return this.getState() !== undefined;
-      }
       protected async initializeState() {
         return new AppState();
       }
@@ -152,9 +140,6 @@ describe('resetAppState', () => {
     const { UseCase, createUseCase } = await load();
 
     class Escape extends UseCase<AppState> {
-      protected isAppStateInitialized() {
-        return this.getState() !== undefined;
-      }
       protected async initializeState() {
         return new AppState();
       }
