@@ -53,30 +53,37 @@ so presenters keep rendering stale data. That is a silent desync; the guard turn
 it into an error at the offending line. Presenters separately receive a fully
 readonly view, so the UI cannot write at all.
 
-### Immutable state
+### Mutate in place, or replace immutably — your choice
 
-Nothing requires the data under the root to be mutable. Keep a stable root
-object and replace whole branches with new frozen values:
+The library takes no position on how state is shaped. Mutating in place is fully
+supported, and so is a Redux-style approach where branches are replaced with new
+values. Both are allowed in the same state tree, even in the same use case:
 
 ```ts
 class AppState {
-  tenants: readonly Tenant[] = Object.freeze([]);
+  log: string[] = [];                                   // mutated in place
+  tenants: readonly Tenant[] = Object.freeze([]);       // replaced wholesale
 }
 
 class AddTenant extends UseCase<AppState> {
   protected async runLogic(name: string) {
     const state = this.getState();
+
+    state.log.push(`adding ${name}`);
     state.tenants = Object.freeze([...state.tenants, new Tenant(name)]);
   }
 }
 ```
 
-Each replacement gives presenters a new reference, so identity-based change
-detection works. Frozen values are read back through the proxies without issue.
+The only rule is the one above: the write happens inside a use case.
 
-The root itself must stay a stable object — it is adopted once from
-`initializeState()` and there is no API to swap it wholesale, so the pattern is
-"immutable data under a mutable root" rather than a single replaced state tree.
+The two styles differ in how presenters detect change. An in-place mutation
+keeps the branch's identity, so a presenter comparing references sees nothing
+and must diff structurally — which is what the reconciled store does. A
+replacement yields a new reference, so reference comparison is enough.
+
+The root object itself stays stable either way: it is adopted once from
+`initializeState()`, and there is no API to swap it wholesale.
 
 Two limits are worth knowing:
 
