@@ -90,6 +90,30 @@ replacement yields a new reference, so reference comparison is enough.
 The root object itself stays stable either way: it is adopted once from
 `initializeState()`, and there is no API to swap it wholesale.
 
+### Resetting state
+
+`resetAppState()` is `protected` on `UseCase`, so only a use case can trigger a
+reset — a component or presenter has no access to it. Put it in a use case that
+represents the event:
+
+```ts
+class LogOut extends AppUseCase {
+  protected async runLogic() {
+    await api.logOut();
+    this.resetAppState();
+  }
+}
+```
+
+It clears application state, the event bus's retained copy, the in-flight
+deduplication map, and any bootstrap still in flight — all four, since leaving
+one behind resurrects the old state. Presenters are notified so the UI clears,
+and the next `execute()` bootstraps through `initializeState()` again.
+
+`protected` is a compile-time boundary, so JavaScript can still reach the
+method. Calling it outside a running use case throws, which is the same
+mutation window that governs every other write.
+
 ### State is adopted, not borrowed
 
 The object returned from `initializeState()` is deep-cloned. The caller keeps

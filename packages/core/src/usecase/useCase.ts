@@ -1,7 +1,7 @@
 import { deepReadonly, useCaseWritable } from './deepReadonly';
 import { type EventEmitter, eventEmitter } from './eventEmitter';
 import { assertNotOnServer } from './serverGuard';
-import { withMutationWindow } from './mutationWindow';
+import { withMutationWindow, assertMutationWindowOpen } from './mutationWindow';
 import { deepClone } from './deepClone';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,6 +75,23 @@ export abstract class UseCase<T> {
   protected getState(): T {
     assertNotOnServer('Reading use case state');
     return useCaseWritable(UseCase.state as object) as T;
+  }
+
+  /**
+   * Clears application state so the next execution bootstraps it again.
+   *
+   * All four pieces of module state go together: the state itself, the
+   * emitter's retained copy, the in-flight dedup map, and any bootstrap in
+   * flight. Leaving any one behind resurrects the old state.
+   */
+  protected resetAppState(): void {
+    assertNotOnServer('Resetting application state');
+    assertMutationWindowOpen('Resetting application state');
+
+    UseCase.state = undefined;
+    UseCase.runningUseCases.clear();
+    UseCase.initialStatePromise = undefined;
+    this.eventEmitter?.resetState();
   }
 
   protected navigate(url: string) {

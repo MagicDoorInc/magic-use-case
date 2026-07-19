@@ -31,3 +31,11 @@ export async function withMutationWindow<T>(run: () => Promise<T>): Promise<T> {
     closeMutationWindow();
   }
 }
+
+export function assertMutationWindowOpen(operation: string): void {
+  if (isMutationWindowOpen()) return;
+
+  throw new Error(
+    `[magic-use-case] ${operation} is only allowed inside a running use case.`,
+  );
+}

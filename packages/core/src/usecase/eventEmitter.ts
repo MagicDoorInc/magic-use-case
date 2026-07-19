@@ -8,6 +8,7 @@ export interface EventEmitter {
   registerForErrors(handler: EventHandler): void;
   unregisterFromErrors(handler: EventHandler): void;
   emitStateChange(data?: unknown): void;
+  resetState(): void;
   emitError(error: Error): void;
   emitNavigation(url: string): void;
 }
@@ -49,6 +50,16 @@ class ConcreteEventEmitter implements EventEmitter {
   public emitStateChange(data?: unknown) {
     this.state = data;
     this.emit(this.stateChange, data);
+  }
+
+  /**
+   * Drops the retained state as well as notifying. Without clearing `state`,
+   * `registerForStateChange` would replay the pre-reset value to any presenter
+   * constructed afterwards.
+   */
+  public resetState() {
+    this.state = undefined;
+    this.emit(this.stateChange, undefined);
   }
 
   public emitError(error: Error) {
