@@ -50,8 +50,13 @@ the write throws:
 
 This exists because a write made outside a use case emits no state-change event,
 so presenters keep rendering stale data. That is a silent desync; the guard turns
-it into an error at the offending line. Presenters separately receive a fully
-readonly view, so the UI cannot write at all.
+it into an error at the offending line.
+
+Presenters are covered by a second, stricter rule: `createModel` receives a fully
+readonly view, and anything it passes through to the view model stays readonly.
+That view never accepts a write, independently of whether a use case happens to
+be running — so a presenter cannot write state even when a nested use case has
+left the mutation window open.
 
 ### Mutate in place, or replace immutably — your choice
 
