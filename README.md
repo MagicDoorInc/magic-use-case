@@ -41,15 +41,24 @@ DOM generator, and `dist/server.js` compiled with its SSR generator. The exports
 map routes `node`, `deno`, and `worker` to the server build automatically, so
 `renderToString` works with no configuration.
 
-> [!WARNING]
-> **Application state is currently process-global, not request-scoped.**
-> `UseCase` holds its state in a `static` field and the event bus is a module
-> singleton. In a browser — one process per user — that is fine. On a server,
-> every concurrent request shares them, so one user's state can be read while
-> rendering another user's page.
->
-> Rendering markup works today. Do not use a shared server process to render
-> per-user state until state is request-scoped (e.g. via `AsyncLocalStorage`).
+Rendering static markup on the server is supported. Rendering **per-user state**
+is not, and the server build enforces that rather than leaving it to convention:
+
+```
+Error: [magic-use-case] Executing a use case is not available during
+server-side rendering.
+```
+
+Application state is process-global by design — `UseCase` keeps state in a
+`static` field and the event bus is a module singleton. In a browser, where
+there is one process per user, that is exactly right. On a server one process
+serves many concurrent requests, so those globals would be shared and one user
+could be served another user's data. On the server build, executing a use case,
+reading use-case state, or constructing a `Presenter` throws immediately.
+
+Fetch per-user data in your server framework and render it on the client, or
+wait for request-scoped state (`AsyncLocalStorage`), which would lift this
+restriction.
 
 ## Repository layout
 

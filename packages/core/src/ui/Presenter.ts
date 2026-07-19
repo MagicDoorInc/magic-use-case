@@ -1,4 +1,5 @@
 import { eventEmitter } from "../usecase/eventEmitter";
+import { assertNotOnServer } from "../usecase/serverGuard";
 
 export abstract class Presenter<T extends object> {
   private state: T | undefined;
@@ -6,6 +7,10 @@ export abstract class Presenter<T extends object> {
   private stateChangeHandler: (newState: unknown) => void;
 
   constructor() {
+    // Registering replays the last emitted state, which on a server would be
+    // whatever the previous request left behind.
+    assertNotOnServer('Constructing a Presenter');
+
     this.stateChangeHandler = (newState: unknown) => {
       const newModel = this.createModel(newState);
       this.state = newModel as T;

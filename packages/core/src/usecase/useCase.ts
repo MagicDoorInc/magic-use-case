@@ -1,5 +1,6 @@
 import { deepReadonly } from './deepReadonly';
 import { type EventEmitter, eventEmitter } from './eventEmitter';
+import { assertNotOnServer } from './serverGuard';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type UseCaseClass<T> = new (...args: any[]) => UseCase<T>;
@@ -27,6 +28,9 @@ export abstract class UseCase<T> {
   }
 
   public async execute(params?: unknown): Promise<boolean> {
+    // Deliberately outside the try below: this must propagate to the caller,
+    // not be captured and reported as a failed execution.
+    assertNotOnServer('Executing a use case');
     try {
       if (!this.isAppStateInitialized()) {
         if (!UseCase.initialStatePromise) {
@@ -65,6 +69,7 @@ export abstract class UseCase<T> {
   }
 
   protected getState(): T {
+    assertNotOnServer('Reading use case state');
     return UseCase.state as T;
   }
 
