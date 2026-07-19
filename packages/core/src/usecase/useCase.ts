@@ -2,6 +2,7 @@ import { deepReadonly, useCaseWritable } from './deepReadonly';
 import { type EventEmitter, eventEmitter } from './eventEmitter';
 import { assertNotOnServer } from './serverGuard';
 import { withMutationWindow } from './mutationWindow';
+import { deepClone } from './deepClone';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type UseCaseClass<T> = new (...args: any[]) => UseCase<T>;
@@ -36,7 +37,9 @@ export abstract class UseCase<T> {
       if (!this.isAppStateInitialized()) {
         if (!UseCase.initialStatePromise) {
           UseCase.initialStatePromise = this.initializeState().then((state) => {
-            UseCase.state = state;
+            // Adopted, not borrowed: the caller keeps their object, but it is
+            // no longer application state and writing to it has no effect.
+            UseCase.state = deepClone(state);
           });
         }
         try {

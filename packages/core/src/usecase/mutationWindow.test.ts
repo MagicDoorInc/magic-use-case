@@ -18,39 +18,42 @@ async function load() {
 describe('state mutation is confined to use cases', () => {
   it('allows writes from inside runLogic', async () => {
     const { UseCase } = await load();
-    const state = new AppState();
 
     class Load extends UseCase<AppState> {
       protected isAppStateInitialized() {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {
         this.getState().tenants.push('alice');
         this.getState().meta.count = 1;
       }
+      // Application state is the adopted clone, so tests read it back here
+      // rather than through the object handed to initializeState().
+      peek() {
+        return this.getState();
+      }
     }
 
-    await expect(new Load().execute()).resolves.toBe(true);
-    expect(state.tenants).toEqual(['alice']);
-    expect(state.meta.count).toBe(1);
+    const uc = new Load();
+    await expect(uc.execute()).resolves.toBe(true);
+    expect(uc.peek().tenants).toEqual(['alice']);
+    expect(uc.peek().meta.count).toBe(1);
   });
 
   it('rejects writes through a state reference held outside a use case', async () => {
-    const { UseCase, useCaseWritable } = await load();
-    const state = new AppState();
+    const { UseCase } = await load();
 
     class Load extends UseCase<AppState> {
       protected isAppStateInitialized() {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {}
-      // Leak the guarded view, as a component might if handed one.
       escape() {
         return this.getState();
       }
@@ -60,46 +63,42 @@ describe('state mutation is confined to use cases', () => {
     await uc.execute();
     const escaped = uc.escape();
 
-    // The window has closed, so the same object now refuses writes.
+    // The window has closed, so the same view now refuses writes.
     expect(() => {
       escaped.meta.count = 99;
     }).toThrow(/outside a use case/);
     expect(() => escaped.tenants.push('mallory')).toThrow(/outside a use case/);
-    expect(state.meta.count).toBe(0);
-
-    // And a freshly wrapped view behaves the same: reads fine, writes throw.
-    expect(useCaseWritable(state).tenants.length).toBe(0);
-    expect(() => {
-      useCaseWritable(state).meta.count = 5;
-    }).toThrow(/outside a use case/);
+    expect(uc.escape().meta.count).toBe(0);
   });
 
   it('closes the window even when runLogic throws', async () => {
-    const { UseCase, useCaseWritable } = await load();
-    const state = new AppState();
+    const { UseCase } = await load();
 
     class Failing extends UseCase<AppState> {
       protected isAppStateInitialized() {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {
         throw new Error('boom');
       }
+      peek() {
+        return this.getState();
+      }
     }
 
-    await new Failing().execute();
+    const uc = new Failing();
+    await uc.execute();
 
     expect(() => {
-      useCaseWritable(state).meta.count = 1;
+      uc.peek().meta.count = 1;
     }).toThrow(/outside a use case/);
   });
 
   it('keeps the window open for the outer use case when they nest', async () => {
-    const { UseCase, useCaseWritable } = await load();
-    const state = new AppState();
+    const { UseCase } = await load();
     let innerRan = false;
 
     class Inner extends UseCase<AppState> {
@@ -107,7 +106,7 @@ describe('state mutation is confined to use cases', () => {
         return true;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {
         innerRan = true;
@@ -119,58 +118,70 @@ describe('state mutation is confined to use cases', () => {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {
         await new Inner().execute();
         // The inner use case finishing must not have closed our window.
         this.getState().meta.count = 7;
       }
+      peek() {
+        return this.getState();
+      }
     }
 
-    await expect(new Outer().execute()).resolves.toBe(true);
+    const uc = new Outer();
+    await expect(uc.execute()).resolves.toBe(true);
     expect(innerRan).toBe(true);
-    expect(state.meta.count).toBe(7);
+    expect(uc.peek().meta.count).toBe(7);
     expect(() => {
-      useCaseWritable(state).meta.count = 8;
+      uc.peek().meta.count = 8;
     }).toThrow(/outside a use case/);
   });
 
-  it('KNOWN GAP: the raw object is still writable, bypassing the proxy', async () => {
+  it('detaches the object given to initializeState, so later writes to it do nothing', async () => {
     const { UseCase } = await load();
-    const state = new AppState();
+    const original = new AppState();
 
     class Load extends UseCase<AppState> {
       protected isAppStateInitialized() {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return original;
       }
       protected async runLogic() {}
+      peek() {
+        return this.getState();
+      }
     }
 
-    await new Load().execute();
+    const uc = new Load();
+    await uc.execute();
 
-    // The consumer constructed `state`, so they hold the unproxied object. The
-    // guard cannot see writes made through it, and no state-change event fires.
-    state.meta.count = 42;
-    expect(state.meta.count).toBe(42);
+    // Writing to the caller's own reference is legal — it is an ordinary object
+    // — but it is no longer application state.
+    original.meta.count = 42;
+    original.tenants.push('mallory');
+
+    expect(uc.peek().meta.count).toBe(0);
+    expect(uc.peek().tenants).toEqual([]);
   });
 
   it('KNOWN GAP: an await in runLogic leaves the window open to other code', async () => {
     const { UseCase, useCaseWritable } = await load();
-    const state = new AppState();
     let observedDuringAwait: string | undefined;
+    let live: AppState | undefined;
 
     class Slow extends UseCase<AppState> {
       protected isAppStateInitialized() {
         return false;
       }
       protected async initializeState() {
-        return state;
+        return new AppState();
       }
       protected async runLogic() {
+        live = this.getState();
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
     }
@@ -181,7 +192,7 @@ describe('state mutation is confined to use cases', () => {
     const probe = new Promise<void>((resolve) =>
       setTimeout(() => {
         try {
-          useCaseWritable(state).meta.count = 1;
+          useCaseWritable(live as object as AppState).meta.count = 1;
           observedDuringAwait = 'allowed';
         } catch {
           observedDuringAwait = 'blocked';

@@ -32,6 +32,9 @@ describe('presenters cannot modify application state', () => {
       protected async runLogic() {
         this.getState().tenants.push('alice');
       }
+      peek() {
+        return this.getState();
+      }
     }
 
     class Evil extends Presenter<{ n: number }> {
@@ -54,11 +57,12 @@ describe('presenters cannot modify application state', () => {
     }
 
     new Evil();
-    await createUseCase(Load).execute();
+    const uc = createUseCase(Load) as InstanceType<typeof Load>;
+    await uc.execute();
 
     expect(attempts).toEqual(['assign:blocked', 'push:blocked', 'delete:blocked']);
-    expect(state.meta.count).toBe(0);
-    expect(state.tenants).toEqual(['alice']);
+    expect(uc.peek().meta.count).toBe(0);
+    expect(uc.peek().tenants).toEqual(['alice']);
   });
 
   it('is blocked even while a nested use case leaves the mutation window open', async () => {
@@ -91,6 +95,9 @@ describe('presenters cannot modify application state', () => {
         // Inner emits a state change while Outer's window is still open.
         await createUseCase(Inner).execute();
       }
+      peek() {
+        return this.getState();
+      }
     }
 
     class Watcher extends Presenter<{ n: number }> {
@@ -110,13 +117,14 @@ describe('presenters cannot modify application state', () => {
     }
 
     new Watcher();
-    await createUseCase(Outer).execute();
+    const outer = createUseCase(Outer) as InstanceType<typeof Outer>;
+    await outer.execute();
 
     // The nested emit lands while the outer window is still open, so the
     // mutation window is not what protects state here — the readonly view is.
     expect(observations.some((o) => o.windowOpen)).toBe(true);
     expect(observations.every((o) => !o.writeAllowed)).toBe(true);
-    expect(state.meta.count).toBe(1);
+    expect(outer.peek().meta.count).toBe(1);
   });
 
   it('cannot mutate state through the model it returns', async () => {
@@ -134,6 +142,9 @@ describe('presenters cannot modify application state', () => {
       protected async runLogic() {
         this.getState().tenants.push('alice');
       }
+      peek() {
+        return this.getState();
+      }
     }
 
     class P extends Presenter<{ tenants: string[] }> {
@@ -147,15 +158,16 @@ describe('presenters cannot modify application state', () => {
     p.subscribe((m) => {
       model = m;
     });
-    await createUseCase(Load).execute();
+    const uc = createUseCase(Load) as InstanceType<typeof Load>;
+    await uc.execute();
 
     expect(model?.tenants).toEqual(['alice']);
     // The array handed to the view is still the readonly proxy.
     expect(() => model!.tenants.push('mallory')).toThrow(/readonly/);
-    expect(state.tenants).toEqual(['alice']);
+    expect(uc.peek().tenants).toEqual(['alice']);
   });
 
-  it('KNOWN GAP: a presenter closing over the raw state object can still write', async () => {
+  it('cannot reach state by closing over the object given to initializeState', async () => {
     const { UseCase, createUseCase, Presenter } = await load();
     const state = new AppState();
 
@@ -167,19 +179,25 @@ describe('presenters cannot modify application state', () => {
         return state;
       }
       protected async runLogic() {}
+      peek() {
+        return this.getState();
+      }
     }
 
     class Sneaky extends Presenter<{ n: number }> {
       protected createModel() {
-        // Not the delivered view — the module-level object the consumer built.
+        // Not the delivered view — the object the consumer built. Since it is
+        // cloned on adoption, this write lands on a detached object.
         state.meta.count = 7;
         return { n: state.meta.count };
       }
     }
 
     new Sneaky();
-    await createUseCase(Load).execute();
+    const uc = createUseCase(Load) as InstanceType<typeof Load>;
+    await uc.execute();
 
     expect(state.meta.count).toBe(7);
+    expect(uc.peek().meta.count).toBe(0);
   });
 });

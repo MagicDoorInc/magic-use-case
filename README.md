@@ -90,15 +90,31 @@ replacement yields a new reference, so reference comparison is enough.
 The root object itself stays stable either way: it is adopted once from
 `initializeState()`, and there is no API to swap it wholesale.
 
-Two limits are worth knowing:
+### State is adopted, not borrowed
 
-- **The object you return from `initializeState()` stays writable.** You
-  constructed it, so you hold an unproxied reference, and writes through it are
-  invisible to the guard. Hand it to the library and read it back via
-  `getState()` rather than keeping the reference around.
-- **The window is time-based, not call-based.** While a use case awaits, any
-  code that happens to run is inside the window and may write. The guard catches
-  mistakes; it is not a security boundary.
+The object returned from `initializeState()` is deep-cloned. The caller keeps
+their reference, but it is no longer application state — writing to it has no
+effect and emits nothing:
+
+```ts
+const original = new AppState();
+// ...after the use case has run
+original.tenants.push(tenant);   // legal, but changes nothing
+```
+
+`getState()` is the only way to reach live state. The clone preserves
+prototypes, so class-based state stays class-based: `instanceof` holds and
+methods still work.
+
+> [!NOTE]
+> **`#private` fields cannot be cloned.** There is no reflection for them, so a
+> method reading `this.#field` on the clone throws `Cannot read private member`.
+> Use TypeScript's `private` or a `_` prefix — both are ordinary properties and
+> clone correctly.
+
+One limit remains: **the mutation window is time-based, not call-based.** While
+a use case awaits, any code that happens to run is inside the window and may
+write. The guard catches mistakes; it is not a security boundary.
 
 ## Server-side rendering
 

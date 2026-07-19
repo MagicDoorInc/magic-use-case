@@ -57,11 +57,15 @@ describe('immutable state patterns', () => {
         const current = this.getState().tenants;
         this.getState().tenants = Object.freeze([...current, name as string]);
       }
+      peek() {
+        return this.getState();
+      }
     }
 
-    await expect(new AddTenant().execute('alice')).resolves.toBe(true);
-    expect(state.tenants).toEqual(['alice']);
-    expect(Object.isFrozen(state.tenants)).toBe(true);
+    const uc = new AddTenant();
+    await expect(uc.execute('alice')).resolves.toBe(true);
+    expect(uc.peek().tenants).toEqual(['alice']);
+    expect(Object.isFrozen(uc.peek().tenants)).toBe(true);
   });
 
   it('still refuses a branch replacement made outside a use case', async () => {
@@ -91,7 +95,7 @@ describe('immutable state patterns', () => {
     expect(() => {
       uc.escape().tenants = Object.freeze(['mallory']);
     }).toThrow(/outside a use case/);
-    expect(state.tenants).toEqual([]);
+    expect(uc.escape().tenants).toEqual([]);
   });
 
   it('gives presenters a new identity per replacement, so change detection works', () => {

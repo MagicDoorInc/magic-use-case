@@ -42,14 +42,18 @@ describe('in-place and immutable styles coexist', () => {
         s.tenants = Object.freeze([...s.tenants, 'alice']);
         s.settings = Object.freeze({ ...s.settings, theme: 'dark' });
       }
+      peek() {
+        return this.getState();
+      }
     }
 
-    await expect(new DoBoth().execute()).resolves.toBe(true);
+    const uc = new DoBoth();
+    await expect(uc.execute()).resolves.toBe(true);
 
-    expect(state.log).toEqual(['started']);
-    expect(state.counters.get('runs')).toBe(1);
-    expect(state.tenants).toEqual(['alice']);
-    expect(state.settings.theme).toBe('dark');
+    expect(uc.peek().log).toEqual(['started']);
+    expect(uc.peek().counters.get('runs')).toBe(1);
+    expect(uc.peek().tenants).toEqual(['alice']);
+    expect(uc.peek().settings.theme).toBe('dark');
   });
 
   it('blocks both styles equally when outside a use case', async () => {
