@@ -59,6 +59,21 @@ function isObject(value: unknown): value is object {
   return value !== null && typeof value === 'object';
 }
 
+/**
+ * A Proxy `get` trap must return the target's exact value for a property that
+ * is both non-writable and non-configurable — which is what `Object.freeze`
+ * produces. Wrapping such a value would throw a TypeError, so it is handed back
+ * unwrapped. The property is already immutable at that slot, so nothing is lost
+ * for a deeply frozen state; a shallowly frozen one keeps its nested objects
+ * writable, which is the caller's choice to make.
+ */
+function mustReturnRaw(target: object, prop: string | symbol): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+  return descriptor !== undefined
+    && descriptor.configurable === false
+    && descriptor.writable === false;
+}
+
 function wrap(value: unknown, policy: Policy): unknown {
   return isObject(value) ? proxyFor(value, policy) : value;
 }
@@ -163,7 +178,8 @@ function createObjectProxy(target: object, policy: Policy): object {
       }
 
       const value = Reflect.get(target, prop, receiver);
-      return isObject(value) ? proxyFor(value, policy) : value;
+      if (!isObject(value) || mustReturnRaw(target, prop)) return value;
+      return proxyFor(value, policy);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);

@@ -53,6 +53,31 @@ so presenters keep rendering stale data. That is a silent desync; the guard turn
 it into an error at the offending line. Presenters separately receive a fully
 readonly view, so the UI cannot write at all.
 
+### Immutable state
+
+Nothing requires the data under the root to be mutable. Keep a stable root
+object and replace whole branches with new frozen values:
+
+```ts
+class AppState {
+  tenants: readonly Tenant[] = Object.freeze([]);
+}
+
+class AddTenant extends UseCase<AppState> {
+  protected async runLogic(name: string) {
+    const state = this.getState();
+    state.tenants = Object.freeze([...state.tenants, new Tenant(name)]);
+  }
+}
+```
+
+Each replacement gives presenters a new reference, so identity-based change
+detection works. Frozen values are read back through the proxies without issue.
+
+The root itself must stay a stable object — it is adopted once from
+`initializeState()` and there is no API to swap it wholesale, so the pattern is
+"immutable data under a mutable root" rather than a single replaced state tree.
+
 Two limits are worth knowing:
 
 - **The object you return from `initializeState()` stays writable.** You
