@@ -1,4 +1,4 @@
-import { createUseCase, type UseCaseClass } from '@magic-use-case/core';
+import { createUseCase, type UseCaseClass } from '@magicdoor/magic-use-case-core';
 import { createSignal } from 'solid-js';
 
 export function useUseCase<T>(UseCaseClass: UseCaseClass<T>) {
@@ -11,9 +11,14 @@ export function useUseCase<T>(UseCaseClass: UseCaseClass<T>) {
   const execute = async (params?: unknown) => {
     setIsLoading(true);
     setDidSucceed(false);
-    const success = await useCase.execute(params);
-    setDidSucceed(success);
-    setIsLoading(false);
+    try {
+      await useCase.execute(params);
+      setDidSucceed(true);
+    } catch {
+      setDidSucceed(false);
+    } finally {
+      setIsLoading(false);
+    }
   };
   return { execute, isLoading, didSucceed, progress };
 }

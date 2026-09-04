@@ -34,8 +34,8 @@ describe('server guard', () => {
       protected async runLogic() {}
     }
 
-    // Must reject rather than resolve false — execute() reports ordinary
-    // failures as `false`, which would hide the guard.
+    // The guard is a programming error, not a domain failure: it is raised
+    // before the run begins, so it reaches the caller without being reported.
     await expect(new Load().execute()).rejects.toThrow(/server-side rendering/);
   });
 
@@ -44,13 +44,7 @@ describe('server guard', () => {
     const { Presenter } = await import('../ui/Presenter');
     enableServerGuard();
 
-    class P extends Presenter<{ a: number }> {
-      protected createModel() {
-        return { a: 1 };
-      }
-    }
-
-    expect(() => new P()).toThrow(/Constructing a Presenter/);
+    expect(() => new Presenter(() => ({ a: 1 }))).toThrow(/Constructing a Presenter/);
   });
 
   it('still allows use cases and presenters when the guard is off', async () => {
@@ -63,13 +57,7 @@ describe('server guard', () => {
       }
       protected async runLogic() {}
     }
-    class P extends Presenter<{ a: number }> {
-      protected createModel() {
-        return { a: 1 };
-      }
-    }
-
-    await expect(new Load().execute()).resolves.toBe(true);
-    expect(() => new P()).not.toThrow();
+    await expect(new Load().execute()).resolves.toBeUndefined();
+    expect(() => new Presenter(() => ({ a: 1 }))).not.toThrow();
   });
 });

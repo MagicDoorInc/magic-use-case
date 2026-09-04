@@ -1,3 +1,5 @@
+import { currentScope } from './appScope';
+
 /**
  * Application state may only be mutated from inside a running use case.
  *
@@ -7,20 +9,21 @@
  * updates — into an immediate error at the offending line.
  *
  * A counter rather than a boolean, so nested or concurrent use cases do not
- * close the window early.
+ * close the window early. It belongs to the scope rather than to the module:
+ * one request's running use case must not make another request's state
+ * writable.
  */
-let openWindows = 0;
-
 export function openMutationWindow(): void {
-  openWindows += 1;
+  currentScope().openMutationWindows += 1;
 }
 
 export function closeMutationWindow(): void {
-  openWindows = Math.max(0, openWindows - 1);
+  const scope = currentScope();
+  scope.openMutationWindows = Math.max(0, scope.openMutationWindows - 1);
 }
 
 export function isMutationWindowOpen(): boolean {
-  return openWindows > 0;
+  return currentScope().openMutationWindows > 0;
 }
 
 export async function withMutationWindow<T>(run: () => Promise<T>): Promise<T> {

@@ -1,4 +1,4 @@
-import { onError } from '@magic-use-case/core';
+import { onError } from '@magicdoor/magic-use-case-core';
 import React, { useCallback, useEffect, useRef, useState, Component } from 'react';
 
 interface ErrorDialogProps {

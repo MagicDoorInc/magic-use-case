@@ -1,8 +1,8 @@
 {
-  "name": "@magic-use-case/core",
+  "name": "@magicdoor/magic-use-case-core",
   "version": "0.0.0",
   "private": true,
-  "description": "Internal core for magic-use-case. Not published — bundled into the framework adapters at build time.",
+  "description": "Internal core for magic-use-case. Not published \u2014 bundled into the framework adapters at build time.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,5 +16,9 @@
     "build": "tsup",
     "type-check": "tsc --project typecheckconfig.json"
   },
-  "license": "Apache-2.0"
+  "author": "Norbert Nemes",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^22.20.1"
+  }
 }

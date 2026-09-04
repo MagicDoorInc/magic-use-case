@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { onError, onNavigation } from './eventEmitter';
-import { eventEmitter } from './eventEmitter';
+import { createScope, currentScope, onError, onNavigation } from './appScope';
+
+const eventEmitter = currentScope().emitter;
 
 describe('eventEmitter', () => {
   it('delivers navigation events to subscribers', () => {
@@ -68,5 +69,31 @@ describe('eventEmitter', () => {
     un1();
     un2();
     spy.mockRestore();
+  });
+
+  it('is quiet when a navigation has no subscriber at all', () => {
+    expect(() => eventEmitter.emitNavigation('/nobody-is-listening')).not.toThrow();
+  });
+
+  it('drops a navigation nobody is listening for, and says so about an error', () => {
+    const fresh = (createScope() as unknown as { emitter: typeof eventEmitter }).emitter;
+    const console_ = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const unheard = new Error('nobody');
+
+    fresh.emitNavigation('/nobody');
+    fresh.emitError(unheard);
+
+    // A navigation nobody wanted is nothing; a failure nobody hears about is a
+    // problem, so it goes to the console rather than vanishing.
+    expect(console_).toHaveBeenCalledTimes(1);
+    expect(console_).toHaveBeenCalledWith('Unhandled use case error:', unheard);
+    console_.mockRestore();
+  });
+
+  it('shrugs off unsubscribing from something nothing ever subscribed to', () => {
+    const fresh = (createScope() as unknown as { emitter: typeof eventEmitter }).emitter;
+
+    expect(() => fresh.unregisterFromStateChange(() => undefined)).not.toThrow();
+    expect(() => fresh.unregisterFromNavigation(() => undefined)).not.toThrow();
   });
 });

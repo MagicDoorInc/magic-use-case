@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { useCaseWritable } from './deepReadonly';
+import { UseCase } from './useCase';
+import { createScope, setScopeResolver } from './appScope';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 class AppState {
@@ -9,15 +14,13 @@ class AppState {
   meta: { count: number } = { count: 0 };
 }
 
-async function load() {
-  const { UseCase } = await import('./useCase');
-  const { useCaseWritable } = await import('./deepReadonly');
+function load() {
   return { UseCase, useCaseWritable };
 }
 
 describe('state mutation is confined to use cases', () => {
   it('allows writes from inside runLogic', async () => {
-    const { UseCase } = await load();
+    const { UseCase } = load();
 
     class Load extends UseCase<AppState> {
       protected async initializeState() {
@@ -35,13 +38,13 @@ describe('state mutation is confined to use cases', () => {
     }
 
     const uc = new Load();
-    await expect(uc.execute()).resolves.toBe(true);
+    await expect(uc.execute()).resolves.toBeUndefined();
     expect(uc.peek().tenants).toEqual(['alice']);
     expect(uc.peek().meta.count).toBe(1);
   });
 
   it('rejects writes through a state reference held outside a use case', async () => {
-    const { UseCase } = await load();
+    const { UseCase } = load();
 
     class Load extends UseCase<AppState> {
       protected async initializeState() {
@@ -66,7 +69,7 @@ describe('state mutation is confined to use cases', () => {
   });
 
   it('closes the window even when runLogic throws', async () => {
-    const { UseCase } = await load();
+    const { UseCase } = load();
 
     class Failing extends UseCase<AppState> {
       protected async initializeState() {
@@ -81,7 +84,7 @@ describe('state mutation is confined to use cases', () => {
     }
 
     const uc = new Failing();
-    await uc.execute();
+    await expect(uc.execute()).rejects.toThrow('boom');
 
     expect(() => {
       uc.peek().meta.count = 1;
@@ -89,7 +92,7 @@ describe('state mutation is confined to use cases', () => {
   });
 
   it('keeps the window open for the outer use case when they nest', async () => {
-    const { UseCase } = await load();
+    const { UseCase } = load();
     let innerRan = false;
 
     class Inner extends UseCase<AppState> {
@@ -116,7 +119,7 @@ describe('state mutation is confined to use cases', () => {
     }
 
     const uc = new Outer();
-    await expect(uc.execute()).resolves.toBe(true);
+    await expect(uc.execute()).resolves.toBeUndefined();
     expect(innerRan).toBe(true);
     expect(uc.peek().meta.count).toBe(7);
     expect(() => {
@@ -125,7 +128,7 @@ describe('state mutation is confined to use cases', () => {
   });
 
   it('detaches the object given to initializeState, so later writes to it do nothing', async () => {
-    const { UseCase } = await load();
+    const { UseCase } = load();
     const original = new AppState();
 
     class Load extends UseCase<AppState> {
@@ -151,7 +154,7 @@ describe('state mutation is confined to use cases', () => {
   });
 
   it('KNOWN GAP: an await in runLogic leaves the window open to other code', async () => {
-    const { UseCase, useCaseWritable } = await load();
+    const { UseCase, useCaseWritable } = load();
     let observedDuringAwait: string | undefined;
     let live: AppState | undefined;
 

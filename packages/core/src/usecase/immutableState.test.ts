@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { UseCase } from './useCase';
+import { createScope, setScopeResolver } from './appScope';
 import { deepReadonly, useCaseWritable } from './deepReadonly';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 /**
@@ -38,7 +42,6 @@ describe('immutable state patterns', () => {
   });
 
   it('supports replacing a whole branch with a new frozen value inside a use case', async () => {
-    const { UseCase } = await import('./useCase');
 
     class AppState {
       // Stable root; `tenants` is swapped wholesale rather than mutated.
@@ -60,13 +63,12 @@ describe('immutable state patterns', () => {
     }
 
     const uc = new AddTenant();
-    await expect(uc.execute('alice')).resolves.toBe(true);
+    await expect(uc.execute('alice')).resolves.toBeUndefined();
     expect(uc.peek().tenants).toEqual(['alice']);
     expect(Object.isFrozen(uc.peek().tenants)).toBe(true);
   });
 
   it('still refuses a branch replacement made outside a use case', async () => {
-    const { UseCase } = await import('./useCase');
 
     class AppState {
       tenants: readonly string[] = Object.freeze([]);

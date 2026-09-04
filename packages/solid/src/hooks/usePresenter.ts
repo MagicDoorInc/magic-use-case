@@ -1,14 +1,24 @@
-import { type Presenter } from '@magic-use-case/core';
+import { deepReadonly, Presenter, type DeepReadonly, type Presentation } from '@magicdoor/magic-use-case-core';
 import { onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { createReconciledStore } from './reconciledStore';
 
-export function usePresenter<T extends object>(PresenterClass: new () => Presenter<T>): { model: Accessor<T | undefined> } {
-  const [model, setModel] = createReconciledStore<{ value: T | undefined }>({ value: undefined });
+/**
+ * Subscribes a component to a presentation. The presentation is read once, when
+ * the component first runs: passing a different function on a later render does
+ * not swap it, the same way a component keeps the store it created.
+ *
+ * Components passing the same function share one run of it. An inline arrow is
+ * a new function per component, so it shares with nobody.
+ */
+export function usePresenter<TState, TModel extends object>(
+  presentation: Presentation<TState, TModel>
+): { model: Accessor<DeepReadonly<TModel> | undefined> } {
+  const [model, setModel] = createReconciledStore<{ value: TModel | undefined }>({ value: undefined });
 
-  const presenter = new PresenterClass();
+  const presenter = new Presenter(presentation);
 
-  const updateModel = (newModel?: T) => {
+  const updateModel = (newModel?: TModel) => {
     setModel({ value: newModel });
   };
 
@@ -19,5 +29,13 @@ export function usePresenter<T extends object>(PresenterClass: new () => Present
     presenter.destroy();
   });
 
-  return { model: () => model.value };
+  // Wrapped over the store's proxy rather than under it: reads still track, and
+  // the model belongs to every screen sharing this presentation, so a component
+  // that wrote to it would rewrite what the others are rendering.
+  return {
+    model: () => {
+      const current = model.value;
+      return current === undefined ? undefined : (deepReadonly(current) as DeepReadonly<TModel>);
+    },
+  };
 }

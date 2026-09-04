@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { isMutationWindowOpen } from '../usecase/mutationWindow';
+import { UseCase, createUseCase } from '../usecase/useCase';
+import { Presenter } from './Presenter';
+import { createScope, setScopeResolver } from '../usecase/appScope';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 class AppState {
@@ -9,16 +15,13 @@ class AppState {
   meta: { count: number } = { count: 0 };
 }
 
-async function load() {
-  const { UseCase, createUseCase } = await import('../usecase/useCase');
-  const { Presenter } = await import('./Presenter');
-  const { isMutationWindowOpen } = await import('../usecase/mutationWindow');
+function load() {
   return { UseCase, createUseCase, Presenter, isMutationWindowOpen };
 }
 
 describe('presenters cannot modify application state', () => {
   it('receives a readonly view and throws on any write', async () => {
-    const { UseCase, createUseCase, Presenter } = await load();
+    const { UseCase, createUseCase, Presenter } = load();
     const state = new AppState();
     const attempts: string[] = [];
 
@@ -34,26 +37,24 @@ describe('presenters cannot modify application state', () => {
       }
     }
 
-    class Evil extends Presenter<{ n: number }> {
-      protected createModel(raw: unknown) {
-        const s = raw as AppState;
-        for (const [name, write] of [
-          ['assign', () => (s.meta.count = 99)],
-          ['push', () => s.tenants.push('mallory')],
-          ['delete', () => delete (s as Partial<AppState>).meta],
-        ] as Array<[string, () => unknown]>) {
-          try {
-            write();
-            attempts.push(`${name}:ALLOWED`);
-          } catch {
-            attempts.push(`${name}:blocked`);
-          }
+    const evil = (raw: unknown) => {
+      const s = raw as AppState;
+      for (const [name, write] of [
+        ['assign', () => (s.meta.count = 99)],
+        ['push', () => s.tenants.push('mallory')],
+        ['delete', () => delete (s as Partial<AppState>).meta],
+      ] as Array<[string, () => unknown]>) {
+        try {
+          write();
+          attempts.push(`${name}:ALLOWED`);
+        } catch {
+          attempts.push(`${name}:blocked`);
         }
-        return { n: s.tenants.length };
       }
-    }
+      return { n: s.tenants.length };
+    };
 
-    new Evil();
+    new Presenter(evil);
     const uc = createUseCase(Load) as InstanceType<typeof Load>;
     await uc.execute();
 
@@ -62,11 +63,11 @@ describe('presenters cannot modify application state', () => {
     expect(uc.peek().tenants).toEqual(['alice']);
   });
 
-  it('is blocked even while a nested use case leaves the mutation window open', async () => {
-    const { UseCase, createUseCase, Presenter, isMutationWindowOpen } = await load();
+  it('is handed one model for a whole nest of use cases, and still cannot write to it', async () => {
+    const { UseCase, createUseCase, Presenter, isMutationWindowOpen } = load();
     const state = new AppState();
-    // createModel runs once per emit — Inner's and then Outer's — so every
-    // notification is recorded rather than only the last.
+    // One entry per emit. Inner runs inside Outer's window and so announces
+    // nothing; the whole nest produces the single emit recorded here.
     const observations: Array<{ windowOpen: boolean; writeAllowed: boolean }> = [];
 
     class Inner extends UseCase<AppState> {
@@ -91,35 +92,34 @@ describe('presenters cannot modify application state', () => {
       }
     }
 
-    class Watcher extends Presenter<{ n: number }> {
-      protected createModel(raw: unknown) {
-        const s = raw as AppState;
-        const windowOpen = isMutationWindowOpen();
-        let writeAllowed: boolean;
-        try {
-          s.meta.count = 12345;
-          writeAllowed = true;
-        } catch {
-          writeAllowed = false;
-        }
-        observations.push({ windowOpen, writeAllowed });
-        return { n: s.meta.count };
+    const watch = (raw: unknown) => {
+      const s = raw as AppState;
+      const windowOpen = isMutationWindowOpen();
+      let writeAllowed: boolean;
+      try {
+        s.meta.count = 12345;
+        writeAllowed = true;
+      } catch {
+        writeAllowed = false;
       }
-    }
+      observations.push({ windowOpen, writeAllowed });
+      return { n: s.meta.count };
+    };
 
-    new Watcher();
+    new Presenter(watch);
     const outer = createUseCase(Outer) as InstanceType<typeof Outer>;
     await outer.execute();
 
-    // The nested emit lands while the outer window is still open, so the
-    // mutation window is not what protects state here — the readonly view is.
-    expect(observations.some((o) => o.windowOpen)).toBe(true);
-    expect(observations.every((o) => !o.writeAllowed)).toBe(true);
+    expect(observations).toHaveLength(1);
+    // Announced once the application is quiet, so no window is open by then —
+    // which leaves the readonly view as the only thing refusing the write.
+    expect(observations[0]!.windowOpen).toBe(false);
+    expect(observations[0]!.writeAllowed).toBe(false);
     expect(outer.peek().meta.count).toBe(1);
   });
 
   it('cannot mutate state through the model it returns', async () => {
-    const { UseCase, createUseCase, Presenter } = await load();
+    const { UseCase, createUseCase, Presenter } = load();
     const state = new AppState();
     let model: { tenants: string[] } | undefined;
 
@@ -135,14 +135,8 @@ describe('presenters cannot modify application state', () => {
       }
     }
 
-    class P extends Presenter<{ tenants: string[] }> {
-      protected createModel(raw: unknown) {
-        // Passes the state's own array straight through to the view.
-        return { tenants: (raw as AppState).tenants };
-      }
-    }
-
-    const p = new P();
+    // Passes the state's own array straight through to the view.
+    const p = new Presenter((raw: unknown) => ({ tenants: (raw as AppState).tenants }));
     p.subscribe((m) => {
       model = m;
     });
@@ -156,7 +150,7 @@ describe('presenters cannot modify application state', () => {
   });
 
   it('cannot reach state by closing over the object given to initializeState', async () => {
-    const { UseCase, createUseCase, Presenter } = await load();
+    const { UseCase, createUseCase, Presenter } = load();
     const state = new AppState();
 
     class Load extends UseCase<AppState> {
@@ -169,16 +163,12 @@ describe('presenters cannot modify application state', () => {
       }
     }
 
-    class Sneaky extends Presenter<{ n: number }> {
-      protected createModel() {
-        // Not the delivered view — the object the consumer built. Since it is
-        // cloned on adoption, this write lands on a detached object.
-        state.meta.count = 7;
-        return { n: state.meta.count };
-      }
-    }
-
-    new Sneaky();
+    new Presenter(() => {
+      // Not the delivered view — the object the consumer built. Since it is
+      // cloned on adoption, this write lands on a detached object.
+      state.meta.count = 7;
+      return { n: state.meta.count };
+    });
     const uc = createUseCase(Load) as InstanceType<typeof Load>;
     await uc.execute();
 

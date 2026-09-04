@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { Presenter } from '../ui/Presenter';
+import { UseCase, createUseCase } from './useCase';
+import { createScope, setScopeResolver } from './appScope';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 class AppState {
@@ -9,15 +14,13 @@ class AppState {
   tenants: string[] = [];
 }
 
-async function load() {
-  const { UseCase, createUseCase } = await import('./useCase');
-  const { Presenter } = await import('../ui/Presenter');
+function load() {
   return { UseCase, createUseCase, Presenter };
 }
 
 describe('resetAppState', () => {
   it('clears state so the next execution bootstraps again', async () => {
-    const { UseCase, createUseCase } = await load();
+    const { UseCase, createUseCase } = load();
     let bootstraps = 0;
 
     class Base extends UseCase<AppState> {
@@ -49,7 +52,7 @@ describe('resetAppState', () => {
   });
 
   it('stops the emitter replaying pre-reset state to a new presenter', async () => {
-    const { UseCase, createUseCase, Presenter } = await load();
+    const { UseCase, createUseCase, Presenter } = load();
     const seen: Array<string | undefined> = [];
 
     class Base extends UseCase<AppState> {
@@ -63,24 +66,20 @@ describe('resetAppState', () => {
         this.resetAppState();
       }
     }
-    class P extends Presenter<{ origin: string }> {
-      protected createModel(raw: unknown) {
-        return raw ? { origin: (raw as AppState).origin } : undefined;
-      }
-    }
+    const presentOrigin = (raw: unknown) => ({ origin: (raw as AppState).origin });
 
     await createUseCase(Base).execute();
     await createUseCase(Reset).execute();
 
     // A presenter created after the reset must not inherit the old state.
-    const late = new P();
+    const late = new Presenter(presentOrigin);
     late.subscribe((model) => seen.push(model?.origin));
 
     expect(seen).toEqual([undefined]);
   });
 
   it('notifies existing presenters so the UI clears', async () => {
-    const { UseCase, createUseCase, Presenter } = await load();
+    const { UseCase, createUseCase, Presenter } = load();
     const models: Array<string | undefined> = [];
 
     class Base extends UseCase<AppState> {
@@ -94,13 +93,9 @@ describe('resetAppState', () => {
         this.resetAppState();
       }
     }
-    class P extends Presenter<{ origin: string }> {
-      protected createModel(raw: unknown) {
-        return raw ? { origin: (raw as AppState).origin } : undefined;
-      }
-    }
+    const presentOrigin = (raw: unknown) => ({ origin: (raw as AppState).origin });
 
-    const p = new P();
+    const p = new Presenter(presentOrigin);
     p.subscribe((m) => models.push(m?.origin));
 
     await createUseCase(Base).execute();
@@ -111,7 +106,7 @@ describe('resetAppState', () => {
   });
 
   it('clears the in-flight dedup map', async () => {
-    const { UseCase, createUseCase } = await load();
+    const { UseCase, createUseCase } = load();
     let runs = 0;
 
     class Base extends UseCase<AppState> {
@@ -137,7 +132,7 @@ describe('resetAppState', () => {
   });
 
   it('refuses to run outside a use case', async () => {
-    const { UseCase, createUseCase } = await load();
+    const { UseCase, createUseCase } = load();
 
     class Escape extends UseCase<AppState> {
       protected async initializeState() {

@@ -133,4 +133,48 @@ describe('deepClone limitations', () => {
 
     expect(deepClone(new SoftPrivate()).getSecret()).toBe(49);
   });
+
+  it('carries an accessor across, which then reads the clone rather than the original', () => {
+    const original = { first: 'Ada', last: 'Lovelace' };
+    Object.defineProperty(original, 'full', {
+      get(this: { first: string; last: string }) {
+        return `${this.first} ${this.last}`;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+
+    const copy = deepClone(original) as typeof original & { full: string };
+    copy.first = 'Grace';
+
+    expect(copy.full).toBe('Grace Lovelace');
+    expect((original as typeof original & { full: string }).full).toBe('Ada Lovelace');
+  });
+
+  it('keeps a sealed object sealed', () => {
+    const original = Object.seal({ n: 1 });
+
+    const copy = deepClone(original);
+
+    expect(Object.isSealed(copy)).toBe(true);
+    expect(Object.isFrozen(copy)).toBe(false);
+  });
+
+  it('skips a key an exotic object claims but cannot describe', () => {
+    // A proxy may report an own key in `ownKeys` and still describe it as
+    // nothing. State is full of proxies here, so cloning has to survive one.
+    const phantom = new Proxy(
+      { real: 1 },
+      {
+        ownKeys: (target) => [...Reflect.ownKeys(target), 'phantom'],
+        getOwnPropertyDescriptor: (target, key) =>
+          key === 'phantom' ? undefined : Reflect.getOwnPropertyDescriptor(target, key),
+      }
+    );
+
+    const copy = deepClone(phantom) as { real: number; phantom?: unknown };
+
+    expect(copy.real).toBe(1);
+    expect('phantom' in copy).toBe(false);
+  });
 });

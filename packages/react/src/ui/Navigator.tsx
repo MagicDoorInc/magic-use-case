@@ -1,4 +1,4 @@
-import { onNavigation } from '@magic-use-case/core';
+import { onNavigation } from '@magicdoor/magic-use-case-core';
 import { useEffect, type FC } from 'react';
 
 interface NavigatorProps {

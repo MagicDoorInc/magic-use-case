@@ -25,6 +25,13 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
 
+      # The same gates a pull request passes. `changesets/action` publishes from
+      # this job, so nothing else stands between a red master and npm.
+      - run: npm run build
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm run coverage
+
       # Opens a "Version Packages" PR when changesets are pending; publishes to
       # npm when that PR is merged.
       - uses: changesets/action@v1

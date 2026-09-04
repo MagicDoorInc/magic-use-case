@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { UseCase, createUseCase } from './useCase';
+import { createScope, setScopeResolver } from './appScope';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 class AppState {
@@ -10,7 +14,6 @@ class AppState {
 
 describe('application state bootstraps exactly once', () => {
   it('a second use case cannot replace live state', async () => {
-    const { UseCase, createUseCase } = await import('./useCase');
     let bootstraps = 0;
 
     class Base extends UseCase<AppState> {
@@ -45,7 +48,6 @@ describe('application state bootstraps exactly once', () => {
   });
 
   it('bootstraps once across concurrent first executions', async () => {
-    const { UseCase, createUseCase } = await import('./useCase');
     let bootstraps = 0;
 
     class Base extends UseCase<AppState> {
@@ -67,7 +69,6 @@ describe('application state bootstraps exactly once', () => {
   });
 
   it('bootstraps again only after an explicit reset', async () => {
-    const { UseCase, createUseCase } = await import('./useCase');
     let bootstraps = 0;
 
     class Base extends UseCase<AppState> {

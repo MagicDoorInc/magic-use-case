@@ -1,4 +1,4 @@
-import { onNavigation } from '@magic-use-case/core';
+import { onNavigation } from '@magicdoor/magic-use-case-core';
 import { onCleanup } from 'solid-js';
 
 export interface NavigatorProps {

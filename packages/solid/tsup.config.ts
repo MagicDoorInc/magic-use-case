@@ -17,11 +17,11 @@ export default defineConfig(() =>
   preset.generateTsupOptions(parsed).map((options) => ({
     ...options,
     // Inline the private core package into every bundle.
-    noExternal: ['@magic-use-case/core'],
+    noExternal: ['@magicdoor/magic-use-case-core'],
     external: ['solid-js', 'solid-js/store', 'solid-js/web'],
     // Only the client config emits types; `resolve` is required so the emitted
     // .d.ts inlines core's types instead of leaving a dangling import to a
     // package consumers cannot install.
-    ...(options.dts ? { dts: { resolve: ['@magic-use-case/core'] } } : {}),
+    ...(options.dts ? { dts: { resolve: ['@magicdoor/magic-use-case-core'] } } : {}),
   })),
 );

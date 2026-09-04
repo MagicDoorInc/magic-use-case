@@ -1,4 +1,4 @@
-import { enableServerGuard } from '@magic-use-case/core';
+import { enableServerGuard } from '@magicdoor/magic-use-case-core';
 import { isServer } from 'solid-js/web';
 
 // Application state is process-global by design — correct in a browser, unsafe
@@ -8,7 +8,10 @@ if (isServer) {
   enableServerGuard();
 }
 
-export { UseCase, Presenter } from '@magic-use-case/core';
+export { UseCase, Presenter } from '@magicdoor/magic-use-case-core';
+export type { DeepReadonly, Presentation } from '@magicdoor/magic-use-case-core';
+export { createScope, setScopeResolver } from '@magicdoor/magic-use-case-core';
+export { onError, onNavigation } from '@magicdoor/magic-use-case-core';
 export { usePresenter } from './hooks/usePresenter';
 export { useUseCase } from './hooks/useUseCase';
 export { ErrorHandler } from './ui/ErrorHandler';

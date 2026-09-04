@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { UseCase } from './useCase';
+import { createScope, setScopeResolver } from './appScope';
 import { deepReadonly } from './deepReadonly';
 
 beforeEach(() => {
-  vi.resetModules();
+  // A scope of its own, which is all these tests needed the module graph rebuilt for.
+  const scope = createScope();
+  setScopeResolver(() => scope);
 });
 
 /**
@@ -21,7 +25,6 @@ describe('in-place and immutable styles coexist', () => {
   }
 
   it('supports both styles in the same use case', async () => {
-    const { UseCase } = await import('./useCase');
     const state = new AppState();
 
     class DoBoth extends UseCase<AppState> {
@@ -45,7 +48,7 @@ describe('in-place and immutable styles coexist', () => {
     }
 
     const uc = new DoBoth();
-    await expect(uc.execute()).resolves.toBe(true);
+    await expect(uc.execute()).resolves.toBeUndefined();
 
     expect(uc.peek().log).toEqual(['started']);
     expect(uc.peek().counters.get('runs')).toBe(1);
@@ -54,7 +57,6 @@ describe('in-place and immutable styles coexist', () => {
   });
 
   it('blocks both styles equally when outside a use case', async () => {
-    const { UseCase } = await import('./useCase');
     const state = new AppState();
 
     class Escape extends UseCase<AppState> {

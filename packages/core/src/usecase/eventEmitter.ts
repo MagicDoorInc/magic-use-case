@@ -1,4 +1,4 @@
-type EventHandler = (data?: unknown) => void;
+export type EventHandler = (data?: unknown) => void;
 
 export interface EventEmitter {
   registerForStateChange(handler: EventHandler): void;
@@ -13,7 +13,7 @@ export interface EventEmitter {
   emitNavigation(url: string): void;
 }
 
-class ConcreteEventEmitter implements EventEmitter {
+export class ConcreteEventEmitter implements EventEmitter {
   private events: { [key: string]: EventHandler[] } = {};
   private stateChange = 'stateChange';
   private navigation = 'navigation';
@@ -23,7 +23,16 @@ class ConcreteEventEmitter implements EventEmitter {
   public registerForStateChange(handler: EventHandler) {
     this.register(this.stateChange, handler);
     if (this.state !== undefined) {
-      handler(this.state);
+      try {
+        handler(this.state);
+      } catch (error) {
+        // A handler that fails while catching up never became a live
+        // subscriber: whoever registered it is unwinding and will never hold a
+        // reference to unregister it. Take it back off before rethrowing,
+        // rather than leaving an ownerless handler on every future emit.
+        this.unregister(this.stateChange, handler);
+        throw error;
+      }
     }
   }
 
@@ -96,22 +105,4 @@ class ConcreteEventEmitter implements EventEmitter {
       }
     });
   }
-}
-
-export const eventEmitter = new ConcreteEventEmitter();
-
-export function onError(handler: (error: Error) => void): () => void {
-  const wrapper: EventHandler = (data?: unknown) => {
-    if (data instanceof Error) handler(data);
-  };
-  eventEmitter.registerForErrors(wrapper);
-  return () => eventEmitter.unregisterFromErrors(wrapper);
-}
-
-export function onNavigation(handler: (url: string) => void): () => void {
-  const wrapper: EventHandler = (data?: unknown) => {
-    if (typeof data === 'string') handler(data);
-  };
-  eventEmitter.registerForNavigation(wrapper);
-  return () => eventEmitter.unregisterFromNavigation(wrapper);
 }

@@ -8,8 +8,8 @@ export default defineConfig({
   treeshake: true,
   // Inline the private core package into this bundle. Consumers install only
   // this package; core is never published and has no public API surface.
-  noExternal: ['@magic-use-case/core'],
-  dts: { resolve: ['@magic-use-case/core'] },
+  noExternal: ['@magicdoor/magic-use-case-core'],
+  dts: { resolve: ['@magicdoor/magic-use-case-core'] },
   external: ['react', 'react-dom', 'react/jsx-runtime'],
   esbuildOptions(options) {
     options.jsx = 'automatic';

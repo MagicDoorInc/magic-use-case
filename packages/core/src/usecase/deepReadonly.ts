@@ -7,10 +7,14 @@ const mutatingArrayMethods = new Set([
 ]);
 const iteratorKeys = new Set<string | symbol>(['values', 'entries', Symbol.iterator]);
 
-type DeepReadonly<T> =
-  T extends Map<infer K, infer V> ? ReadonlyMap<K, DeepReadonly<V>> :
-  T extends Set<infer V> ? ReadonlySet<DeepReadonly<V>> :
-  T extends Array<infer V> ? ReadonlyArray<DeepReadonly<V>> :
+type AnyFunction = (...args: never[]) => unknown;
+
+/** What a presentation's model looks like to the screen rendering it. */
+export type DeepReadonly<T> =
+  T extends AnyFunction ? T :
+  T extends ReadonlyMap<infer K, infer V> ? ReadonlyMap<K, DeepReadonly<V>> :
+  T extends ReadonlySet<infer V> ? ReadonlySet<DeepReadonly<V>> :
+  T extends ReadonlyArray<infer V> ? ReadonlyArray<DeepReadonly<V>> :
   T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } :
   T;
 
@@ -108,8 +112,9 @@ function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unkn
         };
       }
 
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
+      const value = Reflect.get(target, prop, target);
+      if (prop === 'constructor' || typeof value !== 'function') return value;
+      return value.bind(target);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
@@ -148,8 +153,9 @@ function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
           target.forEach((v) => cb(wrap(v, policy), wrap(v, policy), receiver));
       }
 
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
+      const value = Reflect.get(target, prop, target);
+      if (prop === 'constructor' || typeof value !== 'function') return value;
+      return value.bind(target);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);

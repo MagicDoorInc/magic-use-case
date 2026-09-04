@@ -1,4 +1,4 @@
-import { onError } from '@magic-use-case/core';
+import { onError } from '@magicdoor/magic-use-case-core';
 import { createSignal, ErrorBoundary, type JSXElement, onCleanup, Show } from 'solid-js';
 
 export interface ErrorDialogProps {

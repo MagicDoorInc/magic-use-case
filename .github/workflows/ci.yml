@@ -20,7 +20,8 @@ jobs:
       - run: npm run build
       - run: npm run type-check
       - run: npm run lint
-      - run: npm test
+      # `coverage` runs the suite and fails if any of it is left unexercised.
+      - run: npm run coverage
 
       # Guard the core boundary: the published bundles must never reference the
       # private core package, and core must never be publishable.
@@ -31,7 +32,7 @@ jobs:
                    packages/solid/dist/index.d.ts \
                    packages/react/dist/index.js \
                    packages/react/dist/index.d.ts; do
-            if grep -q "@magic-use-case/core" "$f"; then
+            if grep -q "@magicdoor/magic-use-case-core" "$f"; then
               echo "::error::$f leaks a reference to the private core package"
               exit 1
             fi
@@ -48,11 +49,11 @@ jobs:
           for pkg in solid react; do
             # --ignore-scripts: dist/ is already built above, and prepack's
             # tsup output would otherwise pollute the --json stdout.
-            files=$(npm pack --workspace @magic-use-case/$pkg --dry-run --json --ignore-scripts \
+            files=$(npm pack --workspace @magicdoor/magic-use-case-$pkg --dry-run --json --ignore-scripts \
               | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)[0].files.map(f=>f.path).join('\n')))")
             echo "$pkg ships:"; echo "$files"
-            if echo "$files" | grep -vqE '^(dist/|package.json$|README.md$|LICENSE$)'; then
-              echo "::error::@magic-use-case/$pkg tarball contains unexpected files"
+            if echo "$files" | grep -vqE '^(dist/|package.json$|README.md$|LICENSE$|CHANGELOG.md$)'; then
+              echo "::error::@magicdoor/magic-use-case-$pkg tarball contains unexpected files"
               exit 1
             fi
           done

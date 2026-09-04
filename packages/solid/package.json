@@ -1,7 +1,7 @@
 {
-  "name": "@magic-use-case/solid",
+  "name": "@magicdoor/magic-use-case-solid",
   "version": "0.1.0",
-  "description": "SolidJS bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
+  "description": "SolidJS bindings for magic-use-case \u2014 clean-architecture use cases and presenters for front-end TypeScript.",
   "type": "module",
   "main": "./dist/server.js",
   "module": "./dist/server.js",
@@ -43,7 +43,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "sideEffects": false,
   "scripts": {
@@ -51,14 +52,19 @@
     "type-check": "tsc --project typecheckconfig.json",
     "prepack": "npm run build"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "peerDependencies": {
     "solid-js": ">1.9.3"
   },
   "devDependencies": {
-    "@magic-use-case/core": "*",
+    "@magicdoor/magic-use-case-core": "*",
+    "@solidjs/testing-library": "^0.8.10",
     "eslint-plugin-solid": "^0.14.5",
     "solid-js": "^1.9.3",
-    "tsup-preset-solid": "^2.2.0"
+    "tsup-preset-solid": "^2.2.0",
+    "vite-plugin-solid": "^2.11.14"
   },
   "keywords": [
     "solidjs",
