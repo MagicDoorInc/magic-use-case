@@ -8,11 +8,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The published packages declare `engines: node >=18`, so that is what gets
+    # tested. 24 is what the runners use by default.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 24]
+    name: build (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       # build first: the adapters resolve core's types from packages/core/dist,
@@ -22,6 +29,9 @@ jobs:
       - run: npm run lint
       # `coverage` runs the suite and fails if any of it is left unexercised.
       - run: npm run coverage
+      # A published version cannot be replaced, so the tarball is checked before
+      # one exists: `attw` for how the types resolve, `publint` for the manifest.
+      - run: npm run check-package
 
       # Guard the core boundary: the published bundles must never reference the
       # private core package, and core must never be publishable.

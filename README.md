@@ -364,9 +364,10 @@ published bundle references core.
 npm install
 npm run build        # build all packages
 npm test             # vitest
-npm run coverage     # vitest with coverage, which CI gates on at 100%
+npm run coverage       # vitest with coverage, which CI gates on at 100%
 npm run lint
 npm run type-check
+npm run check-package  # how the published tarball resolves, before it exists
 ```
 
 Releases are managed with [changesets](https://github.com/changesets/changesets).

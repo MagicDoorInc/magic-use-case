@@ -3,6 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "description": "Internal core for magic-use-case. Not published \u2014 bundled into the framework adapters at build time.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MagicDoorInc/magic-use-case.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/MagicDoorInc/magic-use-case#readme",
+  "bugs": {
+    "url": "https://github.com/MagicDoorInc/magic-use-case/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

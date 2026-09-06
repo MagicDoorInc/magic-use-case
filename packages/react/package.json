@@ -20,6 +20,7 @@
   "scripts": {
     "build": "tsup",
     "type-check": "tsc --project typecheckconfig.json",
+    "check-package": "attw --pack . --ignore-rules cjs-resolves-to-esm && publint --strict",
     "prepack": "npm run build"
   },
   "engines": {
