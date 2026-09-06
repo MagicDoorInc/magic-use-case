@@ -88,7 +88,7 @@ describe('deepReadonly', () => {
     expect([...ro.entries()]).toEqual([['k', 1]]);
   });
 
-  it('keeps a collection recognisable, which is how equality checks identify it', () => {
+  it('keeps a collection recognizable, which is how equality checks identify it', () => {
     const state = { set: new Set(['x']), map: new Map([['k', 1]]) };
     const ro = deepReadonly(state);
     const writable = useCaseWritable(state);

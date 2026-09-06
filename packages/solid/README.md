@@ -20,8 +20,9 @@ npm install @magicdoor/magic-use-case-solid
 - `onError` / `onNavigation` — subscribe to those two channels directly
 - `createScope` / `setScopeResolver` — one scope per request, for server rendering
 
-See the [main README](https://github.com/MagicDoorInc/magic-use-case#readme)
-for usage and examples.
+New to it? The [main README](https://github.com/MagicDoorInc/magic-use-case#readme)
+introduces the five players, walks a complete feature in five steps, and sets out
+the rules the library is built around.
 
 ## Credits
 

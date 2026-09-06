@@ -6,7 +6,7 @@ beforeEach(() => {
 });
 
 describe('server guard', () => {
-  it('is off by default, so client behaviour is unchanged', async () => {
+  it('is off by default, so client behavior is unchanged', async () => {
     const { assertNotOnServer, isServerGuardEnabled } = await import('./serverGuard');
 
     expect(isServerGuardEnabled()).toBe(false);
