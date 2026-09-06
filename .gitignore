@@ -10,3 +10,8 @@ coverage/
 .npmrc
 .env
 .env.*
+
+# A published library commits its lock file: `npm ci` requires one, and it is
+# what makes a CI run reproducible. Negated here because a global ignore rule
+# excludes it everywhere else.
+!package-lock.json
