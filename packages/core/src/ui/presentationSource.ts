@@ -1,4 +1,5 @@
 import type { AppScope } from '../usecase/appScope';
+import { deepReadonly } from '../usecase/deepReadonly';
 import type { Presentation } from './Presentation';
 
 export interface PresentationSource {
@@ -63,6 +64,14 @@ export function acquireSource<TState, TModel extends object>(
   // Registering replays the retained state, so the model is built here rather
   // than on the next change.
   scope.emitter.registerForStateChange(source.handler);
+
+  // A scope can hold state nothing has announced yet — one created around state
+  // a server render handed over. The emitter has nothing to replay, so the model
+  // is built from the state the scope already has.
+  if (source.model === undefined && scope.state !== undefined) {
+    source.handler(deepReadonly(scope.state as object));
+  }
+
   return source;
 }
 

@@ -20,7 +20,7 @@ export default tseslint.config(
       // Core is bundled in at build time and has no supported API surface.
       'import/no-internal-modules': [
         'error',
-        { allow: ['solid-js/*', 'react/*', '**/src/**'] },
+        { allow: ['solid-js/*', 'react/*', 'react-dom/*', '**/src/**'] },
       ],
     },
   },

@@ -1,14 +1,25 @@
 {
   "name": "@magicdoor/magic-use-case-react",
   "version": "0.1.0",
-  "description": "React bindings for magic-use-case \u2014 clean-architecture use cases and presenters for front-end TypeScript.",
+  "description": "React bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "server": [
+        "./dist/server.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
     },
     "./package.json": "./package.json"
   },
@@ -32,10 +43,12 @@
   "devDependencies": {
     "@magicdoor/magic-use-case-core": "*",
     "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.10.5",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.2.7",
     "react": "^19.0.0",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "seroval": "^1.5.5"
   },
   "keywords": [
     "react",

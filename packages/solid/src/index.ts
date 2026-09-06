@@ -1,4 +1,4 @@
-import { setScopeResolver, type Presentation } from '@magicdoor/magic-use-case-core';
+import { adoptSerializedState, setScopeResolver, type Presentation } from '@magicdoor/magic-use-case-core';
 import { isServer } from 'solid-js/web';
 import { usePresenter as presenterForPresentation } from './hooks/usePresenter';
 import { resolveServerScope } from './serverScope';
@@ -9,6 +9,11 @@ import { resolveServerScope } from './serverScope';
 // browser on the shared scope.
 if (isServer) {
   setScopeResolver(resolveServerScope);
+} else {
+  // A page the server rendered with data left that state behind. Adopting it
+  // before anything renders is what keeps hydration from finding one tree on
+  // the server and a different, empty one here.
+  adoptSerializedState();
 }
 
 export { UseCase, Presenter } from '@magicdoor/magic-use-case-core';
@@ -18,6 +23,7 @@ export { onError, onNavigation } from '@magicdoor/magic-use-case-core';
 export { useUseCase } from './hooks/useUseCase';
 export { ErrorHandler } from './ui/ErrorHandler';
 export { Navigator } from './ui/Navigator';
+export { StateTransfer } from './ui/StateTransfer.browser';
 
 /**
  * Augmented by the application to name the type its use cases keep state in:

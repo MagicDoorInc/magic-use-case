@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 
-export function useReconciledStore<T>(initialState: T) {
+export function useReconciledStore<T>(initialState: T | (() => T)) {
+  // A function is passed through as React's lazy initializer, so a caller that
+  // has to compute its first value does it once rather than on every render.
   const [state, setState] = useState<T | undefined>(initialState);
 
   const updateState = useCallback((newData: T | ((prev: T | undefined) => T)) => {

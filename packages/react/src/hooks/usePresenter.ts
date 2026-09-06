@@ -1,4 +1,4 @@
-import { deepReadonly, Presenter, type Presentation } from '@magicdoor/magic-use-case-core';
+import { currentModelFor, deepReadonly, Presenter, type Presentation } from '@magicdoor/magic-use-case-core';
 import { useEffect, useRef, useCallback } from 'react';
 import { useReconciledStore } from './reconciledStore';
 
@@ -12,8 +12,12 @@ import { useReconciledStore } from './reconciledStore';
  * a new function on every render, so it shares with nobody.
  */
 export function usePresenter<TState, TModel extends object>(presentation: Presentation<TState, TModel>) {
-  const [model, setModel] = useReconciledStore<TModel | undefined>(undefined);
   const presentationRef = useRef(presentation);
+  // Seeded from the state the scope already holds, because the subscription
+  // below starts after the render — and on a server it never starts at all, so
+  // this is the only chance to render what was fetched. Lazily, so the
+  // presentation runs once rather than on every render.
+  const [model, setModel] = useReconciledStore<TModel | undefined>(() => currentModelFor(presentationRef.current));
 
   const updateModel = useCallback(
     (newModel: TModel | undefined) => {

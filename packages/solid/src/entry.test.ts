@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRoot } from 'solid-js';
 import type * as SolidWeb from 'solid-js/web';
 
 const aRequest = () => ({ request: new Request('https://example.test/'), locals: {} });
@@ -77,6 +76,9 @@ describe('the package entry', () => {
   it('exposes a presenter hook the application reads its own state through', async () => {
     const { UseCase, createUseCase } = await loadEntryInto({ isServer: false });
     const entry = await import('./index');
+    // From the same copy of Solid the entry just loaded: a root created by an
+    // earlier copy owns nothing the hook registers.
+    const { createRoot } = await import('solid-js');
 
     class Counter {
       value = 0;

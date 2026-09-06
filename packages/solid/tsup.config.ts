@@ -9,7 +9,7 @@ import * as preset from 'tsup-preset-solid';
 // The exports map in package.json routes node/deno/worker to dist/server.js and
 // browsers to dist/index.js.
 const parsed = preset.parsePresetOptions({
-  entries: [{ entry: 'src/index.ts', server_entry: true }],
+  entries: [{ entry: 'src/index.ts', server_entry: 'src/server.ts' }],
   cjs: false,
 });
 

@@ -1628,8 +1628,9 @@ which is which.
 - **A component can never write the model.** `usePresenter` returns `DeepReadonly<TModel>`, so it is a compile error
   before it is a runtime one.
 - **A use case cannot replace live state.** Bootstrapping happens once; `resetAppState()` is the only way back.
-- **Server rendering cannot leak one user's state into another's.** The Solid server build resolves a scope per
-  request, so two requests never share state, the event bus, or a model.
+- **Server rendering cannot leak one user's state into another's.** Both server builds resolve a scope per request,
+  so two requests never share state, the event bus, or a model — and rendering outside a request throws rather than
+  falling back to a shared one.
 - **A presentation cannot read a shape the app never emits.** Once the app names its state type through
   `MagicUseCaseTypes`, `usePresenter` rejects any presentation written against a different one, at compile time.
 
@@ -1938,44 +1939,127 @@ presentation. A browser resolves one scope for the life of the page, which is ex
 per user. A server process serves many concurrent requests, and sharing any one of those would serve one user another
 user's data.
 
-So the server build resolves a scope per request. It reads the request being rendered from Solid's `getRequestEvent()`
-— backed by `AsyncLocalStorage` — and holds that request's scope in a `WeakMap` keyed by the request event, so the
-scope lives exactly as long as the request does. There is nothing to configure: importing the package installs it.
+So a server resolves a scope per request, and each adapter does it the way its framework allows.
+
+**Solid** needs nothing from you. The server build reads the request being rendered from `getRequestEvent()` —
+backed by `AsyncLocalStorage` — and holds that request's scope in a `WeakMap` keyed by the request event, so the
+scope lives exactly as long as the request does. Importing the package installs it.
+
+**React** has no request context to hang a scope on, so the adapter keeps its own `AsyncLocalStorage` and the host
+opens a scope per request:
+
+```tsx
+import { runInRequestScope } from '@magicdoor/magic-use-case-react/server';
+
+const html = await runInRequestScope(() => renderToString(<App />));
+```
+
+Everything rendered inside resolves to that scope, however many times the render awaits. The import lives behind a
+subpath because it reaches for `node:async_hooks`, which no browser bundle should carry.
 
 Two requests rendering at the same moment never touch the same state, the same event bus, or the same models.
 
-### What renders, and what does not
+### What renders
 
 ---
 
-Every component renders, including the ones that read a presenter. What they read is an empty model, because a scope
-starts with no state and nothing has executed yet — `usePresenter` gives `undefined` until a use case writes
-something.
+Every component renders, including the ones that read a presenter. What they read depends on whether anything has
+run: a scope starts empty, so a page that loads its data in `onMount` — or a React effect — renders the same empty
+models the browser would render on its first pass. Server output and the client's first render agree, which is what
+makes hydration clean.
 
-That is also what the browser shows on its first pass, since a page's use cases run from `onMount`, after the first
-render. The server's output and the client's first render agree, which is what makes hydration clean.
+To render *with* data, run the use case where the framework will wait for it, and let the presentations read what it
+wrote:
 
-What does not render is per-user data. Nothing has fetched anything, and there is no `localStorage` on a server to
-read a token from, so the server does not know who is asking. Fetch per-user data in your server framework and render
-it on the client.
+```tsx
+// Solid: a route's preload, awaited because entry-server runs in async mode
+await createUseCase(GetLeasesUseCase).execute();
+```
+
+```tsx
+// React: the host loads before it renders
+const html = await runInRequestScope(async () => {
+  await createUseCase(GetLeasesUseCase).execute();
+  return renderToString(<App />);
+});
+```
+
+Nothing about a use case changes on a server. It writes the same state, announces the same change, and its
+presentations build the same models — in a scope belonging to that one request.
+
+What a use case cannot do on a server is read the browser: there is no `localStorage` to take a token from. Read what
+you need from the request and pass it in, the same way you would pass anything else browser-derived.
+
+### Handing the state to the browser
+
+---
+
+A page rendered with data poses a question the markup cannot answer: the browser starts with an empty scope, renders
+its empty models, and hydration finds a tree that does not match — then fetches everything again. So the state that
+produced the markup travels with it.
+
+It is opt-in, and it is one line.
+
+```tsx
+// Solid: rendered once, anywhere in the tree
+<StateTransfer />
+```
+
+```ts
+// React: the host puts it in the document, outside the hydration root
+import { runInRequestScope, serializedStateScript } from '@magicdoor/magic-use-case-react/server';
+
+res.send(`<div id="root">${html}</div>${serializedStateScript()}`);
+```
+
+The browser adopts it as the package loads, before anything renders. There is nothing to call and nothing to
+configure on that side.
+
+The two shapes differ because the frameworks do. Solid's `useAssets` takes a thunk that runs when the document is
+assembled — after the use cases have finished — and puts the script in the head, outside the hydrated tree. React
+hydrates the tree it rendered, so a script inside it would be a mismatch; React hosts assemble their own document,
+which is the natural place for it.
+
+#### What can cross
+
+Application state has to be data: objects, arrays, sets, maps, dates, primitives, and references shared between them,
+including cycles. All of that survives, which is why the payload is not JSON — `JSON.stringify` turns a `Set` into
+`{}` with no error, and a page then renders as though the data were empty.
+
+A class instance cannot cross, because its prototype cannot: the browser would receive the fields and none of the
+behavior. State holding one raises an error naming the rule rather than the type. Keep behavior in use cases, where
+it belongs, and state stays transferable.
+
+#### Two things to know before you rely on it
+
+**Everything in state reaches the browser**, in the page, in plain text, cached wherever that HTML is cached. A token
+a use case wrote, a record fetched only to check a permission, an internal id — all of it. That is the trade the one
+line makes, and it is why it is opt-in.
+
+**The payload is an inline script**, so a strict `script-src` blocks it unless you supply a nonce. Most Solid
+applications already run inline scripts — the framework's own hydration script is one — but if yours does not,
+this is a deployment question, not a preference.
 
 ### Rendering outside a request
 
 ---
 
-The resolver needs a request to resolve from. Constructing a presenter or executing a use case on a server outside one
-throws rather than quietly falling back to a shared scope, because a silent fallback is the leak this exists to
-prevent:
+The scope belongs to a request, and there has to be one. Constructing a presenter or executing a use case on a server
+outside a request throws rather than quietly falling back to a shared scope, because a silent fallback is the leak
+this exists to prevent:
 
 ```
 Error: [magic-use-case] No request scope is available.
 ```
 
+For React that means the render has to be inside `runInRequestScope`. For Solid there is nothing to open — the
+request the framework is already serving is the scope.
+
 ### Other hosts
 
 ---
 
-`createScope` and `setScopeResolver` are exported so a host the library does not know about can do the same:
+`createScope` and `setScopeResolver` are exported so a host neither adapter knows about can do the same:
 
 ```ts
 const scope = createScope(initialState); // initialState is optional
@@ -1984,9 +2068,6 @@ setScopeResolver(() => scope);
 
 `createScope` returns an opaque handle. Giving it to `setScopeResolver` is the only thing an application can do with a
 scope — the state, the bookkeeping and the event bus inside it belong to the library.
-
-`@magicdoor/magic-use-case-react` installs no resolver of its own. On a server it shares one scope across concurrent
-requests unless you install one, so call `setScopeResolver` yourself before rendering.
 
 ## Repository layout
 

@@ -35,6 +35,7 @@ export default defineWorkspace([
     ssr: { resolve: { conditions: ['development', 'browser'] } },
     test: {
       name: 'solid',
+      setupFiles: ['./packages/solid/vitest.setup.ts'],
       // jsdom for the whole project, not per file: `environment` is what picks
       // Solid's client transform over its SSR one, and the server build compiles
       // components differently enough that the tests would stop covering them.
