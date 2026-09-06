@@ -1,7 +1,6 @@
 import { deepReadonly, useCaseWritable } from './deepReadonly';
 import { currentScope } from './appScope';
 import { type EventEmitter } from './eventEmitter';
-import { assertNotOnServer } from './serverGuard';
 import { withMutationWindow, assertMutationWindowOpen } from './mutationWindow';
 import { withAttachedRun, isCallerStillRunning } from './attachment';
 import { deepClone } from './deepClone';
@@ -63,7 +62,6 @@ export abstract class UseCase<T> {
   }
 
   private async run(params: unknown, run: RunKind): Promise<void> {
-    assertNotOnServer('Executing a use case');
     // Captured once: everything this execution touches belongs to the scope it
     // started in, however many times it awaits.
     const scope = currentScope();
@@ -109,7 +107,6 @@ export abstract class UseCase<T> {
   }
 
   protected getState(): T {
-    assertNotOnServer('Reading use case state');
     return useCaseWritable(currentScope().state as object) as T;
   }
 
@@ -121,7 +118,6 @@ export abstract class UseCase<T> {
    * flight. Leaving any one behind resurrects the old state.
    */
   protected resetAppState(): void {
-    assertNotOnServer('Resetting application state');
     assertMutationWindowOpen('Resetting application state');
 
     const scope = currentScope();

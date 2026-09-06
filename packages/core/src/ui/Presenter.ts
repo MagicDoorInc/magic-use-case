@@ -1,5 +1,4 @@
 import { currentScope, type AppScope } from "../usecase/appScope";
-import { assertNotOnServer } from "../usecase/serverGuard";
 import type { Presentation } from "./Presentation";
 import { acquireSource, releaseSource, type PresentationSource } from "./presentationSource";
 
@@ -23,10 +22,6 @@ export class Presenter<TState, TModel extends object> {
   private scope: AppScope;
 
   constructor(presentation: Presentation<TState, TModel>) {
-    // Acquiring replays the last emitted state, which on a server would be
-    // whatever the previous request left behind.
-    assertNotOnServer('Constructing a Presenter');
-
     this.presentation = presentation;
     this.onModel = (model: unknown) => {
       this.model = model as TModel | undefined;

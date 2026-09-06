@@ -1377,6 +1377,20 @@ export abstract class BaseUseCase extends UseCase<AppState> {
 }
 ```
 
+Then tell the library which type that is, so a presentation cannot quietly declare a different one:
+
+```ts
+declare module "@magicdoor/magic-use-case-react" {
+  interface MagicUseCaseTypes {
+    state: AppState;
+  }
+}
+```
+
+`usePresenter` now accepts only presentations written against `AppState`. Without it, a presentation's state type is
+whatever the presentation claims, so one written against the wrong shape compiles cleanly and throws at runtime — on
+the screen, not in the tests.
+
 ### 3. Write what the app does
 
 ---
@@ -1614,8 +1628,10 @@ which is which.
 - **A component can never write the model.** `usePresenter` returns `DeepReadonly<TModel>`, so it is a compile error
   before it is a runtime one.
 - **A use case cannot replace live state.** Bootstrapping happens once; `resetAppState()` is the only way back.
-- **Server rendering cannot leak one user's state into another's.** The server build refuses the operations that
-  would.
+- **Server rendering cannot leak one user's state into another's.** The Solid server build resolves a scope per
+  request, so two requests never share state, the event bus, or a model.
+- **A presentation cannot read a shape the app never emits.** Once the app names its state type through
+  `MagicUseCaseTypes`, `usePresenter` rejects any presentation written against a different one, at compile time.
 
 **What is convention, and yours to hold:**
 
@@ -1916,22 +1932,50 @@ one of three things:
 `dist/server.js` compiled with its SSR generator. The exports map routes `node`, `deno`, and `worker` to the server
 build automatically, so `renderToString` works with no configuration.
 
-Rendering static markup on the server is supported. Rendering **per-user state** is not, and the server build enforces
-that rather than leaving it to convention:
-
-```
-Error: [magic-use-case] Executing a use case is not available during
-server-side rendering.
-```
-
 Everything that makes up a running application lives in one scope: state itself, the bootstrap and de-duplication
 bookkeeping, the mutation window, the depth of attached runs, the event bus, and the model built for each
 presentation. A browser resolves one scope for the life of the page, which is exactly right where there is one process
 per user. A server process serves many concurrent requests, and sharing any one of those would serve one user another
 user's data.
 
-The scope is resolved through an indirection, so a server build can hand out a scope per request rather than the
-single shared one:
+So the server build resolves a scope per request. It reads the request being rendered from Solid's `getRequestEvent()`
+— backed by `AsyncLocalStorage` — and holds that request's scope in a `WeakMap` keyed by the request event, so the
+scope lives exactly as long as the request does. There is nothing to configure: importing the package installs it.
+
+Two requests rendering at the same moment never touch the same state, the same event bus, or the same models.
+
+### What renders, and what does not
+
+---
+
+Every component renders, including the ones that read a presenter. What they read is an empty model, because a scope
+starts with no state and nothing has executed yet — `usePresenter` gives `undefined` until a use case writes
+something.
+
+That is also what the browser shows on its first pass, since a page's use cases run from `onMount`, after the first
+render. The server's output and the client's first render agree, which is what makes hydration clean.
+
+What does not render is per-user data. Nothing has fetched anything, and there is no `localStorage` on a server to
+read a token from, so the server does not know who is asking. Fetch per-user data in your server framework and render
+it on the client.
+
+### Rendering outside a request
+
+---
+
+The resolver needs a request to resolve from. Constructing a presenter or executing a use case on a server outside one
+throws rather than quietly falling back to a shared scope, because a silent fallback is the leak this exists to
+prevent:
+
+```
+Error: [magic-use-case] No request scope is available.
+```
+
+### Other hosts
+
+---
+
+`createScope` and `setScopeResolver` are exported so a host the library does not know about can do the same:
 
 ```ts
 const scope = createScope(initialState); // initialState is optional
@@ -1941,11 +1985,8 @@ setScopeResolver(() => scope);
 `createScope` returns an opaque handle. Giving it to `setScopeResolver` is the only thing an application can do with a
 scope — the state, the bookkeeping and the event bus inside it belong to the library.
 
-Until a resolver is installed, the server build refuses the operations that would read or write shared state:
-executing a use case, reading use-case state, or constructing the presenter behind `usePresenter`.
-
-So today: fetch per-user data in your server framework and render it on the client. The remaining work to lift that is
-a resolver backed by `AsyncLocalStorage`, plus a way to hand the server's state to the client for hydration.
+`@magicdoor/magic-use-case-react` installs no resolver of its own. On a server it shares one scope across concurrent
+requests unless you install one, so call `setScopeResolver` yourself before rendering.
 
 ## Repository layout
 
