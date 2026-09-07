@@ -1,7 +1,7 @@
 {
   "name": "@magicdoor/magic-use-case-solid",
-  "version": "0.1.0",
-  "description": "SolidJS bindings for magic-use-case \u2014 clean-architecture use cases and presenters for front-end TypeScript.",
+  "version": "0.1.1",
+  "description": "SolidJS bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

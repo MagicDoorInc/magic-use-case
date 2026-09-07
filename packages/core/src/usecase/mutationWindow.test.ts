@@ -153,6 +153,57 @@ describe('state mutation is confined to use cases', () => {
     expect(uc.peek().tenants).toEqual([]);
   });
 
+  /**
+   * A detached run, or one still in flight when a request ends, outlives the
+   * scope it started in. Closing whichever scope happens to be current by then
+   * would shut a window a live run is depending on — which is what a second
+   * request, or the next test in a file, would then be blamed for.
+   */
+  it('closes the window on the scope it opened, not on whichever is current by then', async () => {
+    const { UseCase } = load();
+    let letItFinish: () => void = () => undefined;
+    const heldOpen = new Promise<void>((resolve) => {
+      letItFinish = resolve;
+    });
+
+    class Outliving extends UseCase<AppState> {
+      protected async initializeState() {
+        return new AppState();
+      }
+      protected async runLogic() {
+        await heldOpen;
+      }
+    }
+
+    const stillRunning = new Outliving().execute();
+    // Let it get as far as its await, so its window is genuinely open on this
+    // scope before the next one is installed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const nextScope = createScope();
+    setScopeResolver(() => nextScope);
+
+    class Writing extends UseCase<AppState> {
+      protected async initializeState() {
+        return new AppState();
+      }
+      protected async runLogic() {
+        letItFinish();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        this.getState().meta.count = 3;
+      }
+      peek() {
+        return this.getState();
+      }
+    }
+
+    const writing = new Writing();
+    await expect(writing.execute()).resolves.toBeUndefined();
+    await stillRunning;
+
+    expect(writing.peek().meta.count).toBe(3);
+  });
+
   it('KNOWN GAP: an await in runLogic leaves the window open to other code', async () => {
     const { UseCase, useCaseWritable } = load();
     let observedDuringAwait: string | undefined;

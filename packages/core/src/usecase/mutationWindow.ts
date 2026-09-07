@@ -1,4 +1,4 @@
-import { currentScope } from './appScope';
+import { currentScope, type AppScope } from './appScope';
 
 /**
  * Application state may only be mutated from inside a running use case.
@@ -12,13 +12,20 @@ import { currentScope } from './appScope';
  * close the window early. It belongs to the scope rather than to the module:
  * one request's running use case must not make another request's state
  * writable.
+ *
+ * The scope is captured when the window opens and closed on that same scope. A
+ * run can outlive the scope it started in — a detached one, or one still in
+ * flight when a request ends — and resolving the scope again at closing time
+ * would decrement whichever scope is current by then, shutting a window that
+ * another run is depending on, or throwing where no scope resolves at all.
  */
-export function openMutationWindow(): void {
-  currentScope().openMutationWindows += 1;
+export function openMutationWindow(): AppScope {
+  const scope = currentScope();
+  scope.openMutationWindows += 1;
+  return scope;
 }
 
-export function closeMutationWindow(): void {
-  const scope = currentScope();
+export function closeMutationWindow(scope: AppScope): void {
   scope.openMutationWindows = Math.max(0, scope.openMutationWindows - 1);
 }
 
@@ -27,11 +34,11 @@ export function isMutationWindowOpen(): boolean {
 }
 
 export async function withMutationWindow<T>(run: () => Promise<T>): Promise<T> {
-  openMutationWindow();
+  const scope = openMutationWindow();
   try {
     return await run();
   } finally {
-    closeMutationWindow();
+    closeMutationWindow(scope);
   }
 }
 

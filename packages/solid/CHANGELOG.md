@@ -1,5 +1,20 @@
 # @magicdoor/magic-use-case-solid
 
+## 0.1.1
+
+### Patch Changes
+
+- Close a use case's mutation window on the scope it opened, rather than on
+  whichever scope is current when it finishes.
+
+  A run can outlive the scope it started in — a detached one, or one still in
+  flight when a request ends. Resolving the scope again at closing time made that
+  run decrement a scope it never belonged to, shutting a window another run was
+  depending on: the second run's next write to application state failed with
+  "Cannot set property … outside a use case" even though it was squarely inside
+  `runLogic`. On a server it was worse than a wrong count, since resolving a scope
+  with no request in progress throws, and it threw from inside a `finally`.
+
 ## 0.1.0
 
 ### Minor Changes
