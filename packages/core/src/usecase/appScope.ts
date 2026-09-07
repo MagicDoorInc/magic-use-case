@@ -36,8 +36,6 @@ export interface AppScope extends ScopeHandle {
   sources: Map<object, PresentationSource>;
   /** Depth of running use cases, which is what makes state writable. */
   openMutationWindows: number;
-  /** Depth of running use cases that have a caller, which is what keeps them quiet. */
-  attachedRuns: number;
 }
 
 export function createScope(initialState?: unknown): ScopeHandle {
@@ -48,7 +46,6 @@ export function createScope(initialState?: unknown): ScopeHandle {
     emitter: new ConcreteEventEmitter(),
     sources: new Map(),
     openMutationWindows: 0,
-    attachedRuns: 0,
   };
   return scope;
 }

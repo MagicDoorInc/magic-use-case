@@ -158,7 +158,7 @@ What that means in each adapter:
 
 So there are three separate reasons the UI does less work than the naive reading suggests, and they stack:
 
-1. **State changes are announced when no use case is running** — a flow of ten steps produces one announcement, not
+1. **A run announces only if nobody is waiting on it** — a flow of ten nested steps produces one announcement, not
    ten.
 2. **One run per presentation**, however many screens hold it.
 3. **One rebuild per changed value**, because the reconciled store keeps the rest.
@@ -318,6 +318,10 @@ Three components mounting at once, a click that fires twice, a retry racing the 
 in the component, because the de-duplication is in the library. Runs are keyed by the use case and its parameters, and
 the key is dropped when the run ends, so this is **de-duplication, not caching**: calling it again afterwards runs it
 again, as it should.
+
+A caller that joins a run already in flight is still a caller: if nobody is waiting on it, it announces when the run
+it joined completes. That matters when the run it joined was nested inside something else and therefore silent —
+without it, a screen asking for something another flow was already fetching would never be told it arrived.
 
 #### Different parameters are different work — so await them
 
@@ -520,8 +524,12 @@ Contexts are still the right tool for what they are for — a theme, a locale, a
 application behavior.
 
 **A nested use case does not update the screen.** It writes state exactly as it always does — `getState()` works, the
-mutation window is open, everything it writes is real — but it announces nothing. Only the outermost run does, once,
-when it finishes, carrying everything written beneath it.
+mutation window is open, everything it writes is real — but it announces nothing. Its caller does, once, when it
+finishes, carrying everything written beneath it.
+
+How the library tells the difference is worth knowing, because you choose it at the call site: a use case you
+construct yourself has a caller and stays quiet, while one an adapter created — `useUseCase`, or `detach` — has
+none, and announces.
 
 ```ts
 class InitializeAppUseCase extends BaseUseCase {
@@ -551,7 +559,9 @@ class SubmitRequestUseCase extends BaseUseCase {
 The screen clears immediately and the new row appears when the work lands: two updates, which is exactly what you
 asked for by detaching. See [Work the caller does not wait for](#work-the-caller-does-not-wait-for).
 
-Two unrelated top-level runs overlapping are announced together, when the later one finishes.
+**Runs that are not nested in each other do not wait for each other.** Two flows a screen started independently —
+an initialization still going, and the page's own fetch landing underneath it — each announce when they finish. The
+screen hears about the leases when the leases arrive, not when everything else happens to be done.
 
 **Navigation and failures are never held back.** A nested use case that calls `navigate()` moves the screen
 immediately — usually the point: route first, and let the data that is still loading fill in. A failure travels the

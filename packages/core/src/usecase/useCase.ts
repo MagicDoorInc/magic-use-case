@@ -2,15 +2,12 @@ import { deepReadonly, useCaseWritable } from './deepReadonly';
 import { currentScope } from './appScope';
 import { type EventEmitter } from './eventEmitter';
 import { withMutationWindow, assertMutationWindowOpen } from './mutationWindow';
-import { withAttachedRun, isCallerStillRunning } from './attachment';
 import { deepClone } from './deepClone';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type UseCaseClass<T> = new (...args: any[]) => UseCase<T>;
 
 interface RunKind {
-  /** Started by a use case that is not waiting for it, so it belongs to nobody. */
-  detached: boolean;
   /** Somebody up the stack receives the exception and decides what it means. */
   hasCaller: boolean;
 }
@@ -44,7 +41,7 @@ export abstract class UseCase<T> {
   }
 
   public execute(params?: unknown): Promise<void> {
-    return this.run(params, { detached: false, hasCaller: !entryPoints.has(this as UseCase<unknown>) });
+    return this.run(params, { hasCaller: !entryPoints.has(this as UseCase<unknown>) });
   }
 
   /**
@@ -57,7 +54,7 @@ export abstract class UseCase<T> {
     // Reported on its way out, so there is nothing left for a rejection to tell
     // anyone — and nobody is holding the promise to hear it.
     void createUseCase(UseCaseClass)
-      .run(params, { detached: true, hasCaller: false })
+      .run(params, { hasCaller: false })
       .catch(() => undefined);
   }
 
@@ -91,7 +88,12 @@ export abstract class UseCase<T> {
     scope.runningUseCases.set(this.constructor, classMap);
     const paramsKey = JSON.stringify(params);
     if (classMap.has(paramsKey)) {
+      // Somebody was already doing this, so there is nothing to run — but the
+      // work still landed for this caller, and if nobody is waiting on it then
+      // this is the run that has to say so. The one it joined may be nested,
+      // and nested runs stay quiet.
       await classMap.get(paramsKey);
+      this.announceUnlessCallerWill(run);
       return;
     }
     const executionPromise = this.runWithUpdate(() => this.runLogic(params), run);
@@ -144,26 +146,27 @@ export abstract class UseCase<T> {
   protected abstract initializeState(): Promise<T>;
 
   /**
-   * A nested run is silent: the outermost run announces everything written
-   * beneath it, once, when nothing attached is left running. A detached run
-   * never counts as something anyone is waiting on, so it neither stays quiet
-   * for a caller nor silences the run that started it.
+   * A run announces its work unless somebody is waiting on it. A nested run
+   * stays silent and its caller announces everything written beneath it, once.
    *
-   * Both brackets close before the blocks below run, so what is still open here
-   * belongs to somebody else.
+   * Whether a run has a caller is known when it starts, which is what keeps an
+   * unrelated run finishing at the same moment from being swallowed: two flows
+   * a screen started independently each reach it on their own.
    */
   private async runWithUpdate(functionToRun: () => Promise<void>, run: RunKind): Promise<void> {
-    const body = () => withMutationWindow(functionToRun);
     try {
-      await (run.detached ? body() : withAttachedRun(body));
+      await withMutationWindow(functionToRun);
     } catch (error) {
       this.reportUnlessCallerWill(error, run);
       throw error;
     } finally {
-      if (!isCallerStillRunning()) {
-        this.eventEmitter.emitStateChange(deepReadonly(currentScope().state as object));
-      }
+      this.announceUnlessCallerWill(run);
     }
+  }
+
+  private announceUnlessCallerWill(run: RunKind) {
+    if (run.hasCaller) return;
+    this.eventEmitter.emitStateChange(deepReadonly(currentScope().state as object));
   }
 
   /**

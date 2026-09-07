@@ -66,8 +66,8 @@ describe('presenters cannot modify application state', () => {
   it('is handed one model for a whole nest of use cases, and still cannot write to it', async () => {
     const { UseCase, createUseCase, Presenter, isMutationWindowOpen } = load();
     const state = new AppState();
-    // One entry per emit. Inner runs inside Outer's window and so announces
-    // nothing; the whole nest produces the single emit recorded here.
+    // One entry per emit. Inner has a caller and so announces nothing; the
+    // whole nest produces the single emit recorded here.
     const observations: Array<{ windowOpen: boolean; writeAllowed: boolean }> = [];
 
     class Inner extends UseCase<AppState> {
@@ -84,8 +84,9 @@ describe('presenters cannot modify application state', () => {
         return state;
       }
       protected async runLogic() {
-        // Inner emits a state change while Outer's window is still open.
-        await createUseCase(Inner).execute();
+        // Constructed rather than created: this one has a caller, so it stays
+        // quiet and Outer announces the whole nest.
+        await new Inner().execute();
       }
       peek() {
         return this.getState();

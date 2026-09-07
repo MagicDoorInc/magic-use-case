@@ -174,7 +174,7 @@ function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
 
 function createObjectProxy(target: object, policy: Policy): object {
   return new Proxy(target, {
-    get(target, prop, receiver) {
+    get(target, prop) {
       if (prop === policy.marker) return true;
 
       if (Array.isArray(target) && typeof prop === 'string' && mutatingArrayMethods.has(prop)) {
@@ -183,7 +183,12 @@ function createObjectProxy(target: object, policy: Policy): object {
         return method.bind(target);
       }
 
-      const value = Reflect.get(target, prop, receiver);
+      // Read as the target, not as the proxy. A native accessor — a `File`'s
+      // name, a `Date`'s time — refuses to run for anything but the object it
+      // belongs to, and a method handed out unbound would be called with the
+      // proxy as `this` and refuse the same way.
+      const value = Reflect.get(target, prop, target);
+      if (typeof value === 'function') return prop === 'constructor' ? value : value.bind(target);
       if (!isObject(value) || mustReturnRaw(target, prop)) return value;
       return proxyFor(value, policy);
     },
