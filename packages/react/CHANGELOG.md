@@ -30,10 +30,12 @@
   is reported to the console and leaves its model empty, rather than failing the
   render or the emit that other screens are waiting on.
 
-  **A use case can run other use cases.** State changes are announced when no
-  use case is running: a nested run stays silent, and the outermost run
-  announces everything written beneath it, once. Navigation is not held back, so
-  a nested use case still moves the screen the moment it decides to.
+  **A use case can run other use cases.** A run announces its work unless
+  somebody is waiting on it: a nested run stays silent and its caller announces
+  everything written beneath it, once. Two flows a screen started independently
+  announce independently, so a long initialization never holds back the fetch a
+  page made for itself. Navigation is not held back either, so a nested use case
+  still moves the screen the moment it decides to.
 
   **Failures propagate.** `execute()` rejects, so a nested failure aborts its
   caller and a sequence of steps is a sequence. The failure reaches `onError`
@@ -62,17 +64,36 @@
   `resetAppState()` — protected, callable only from within a running use case — is
   the one way to clear state and bootstrap again.
 
-  **Server-side rendering** is supported for Solid, which ships a bundle compiled
-  with Solid's SSR generator. Rendering static markup works; rendering per-user
-  state throws. Everything that makes up a running application — state, its
-  bookkeeping, the mutation window, the event bus, and each presentation's model
-  — lives in one scope, resolved through an indirection. A browser resolves
-  a single scope; a server process serving concurrent requests would need one per
-  request, and until a build installs a resolver that does that, the operations
-  which would share state across requests refuse to run. `createScope()` hands
-  back an opaque handle: the only thing an application can do with a scope is
-  give it to `setScopeResolver()`, since the bus and the state inside it are the
-  library's own.
+  **The state type is pinned to the application's.** An application names its
+  state type once by augmenting `MagicUseCaseTypes`, and `usePresenter` then
+  accepts only presentations written against it. Without that, a presentation's
+  state type is whatever the presentation claims, and one written against the
+  wrong shape compiles cleanly and fails on the screen.
+
+  **Server-side rendering** resolves a scope per request, so two requests never
+  share state, the event bus, or a presentation's model. Everything that makes
+  up a running application lives in one scope, and on a server that scope
+  belongs to the request being served. Solid needs nothing from you: its server
+  build reads the request from `getRequestEvent()` and keeps that request's
+  scope beside it. React has no request context of its own, so
+  `@magicdoor/magic-use-case-react/server` exports `runInRequestScope()`, which
+  the host opens once per request; the subpath is what keeps `node:async_hooks`
+  out of browser bundles. Rendering outside a request throws rather than falling
+  back to a shared scope, because a silent fallback is the leak this prevents.
+
+  **State can travel to the browser**, so a page rendered with data is not
+  fetched again while it hydrates. It is opt-in and it is one line: Solid
+  renders `<StateTransfer />` once in its tree, React puts
+  `serializedStateScript()` in its document, and the browser adopts what it
+  finds as the package loads. Application state has to be data — objects,
+  arrays, sets, maps, dates, primitives — since a class instance cannot cross
+  without its prototype. Two things to weigh: everything in state reaches the
+  page in plain text, and the payload is an inline script, so a strict
+  `script-src` needs a nonce.
+
+  `createScope()` hands back an opaque handle: the only thing an application can
+  do with a scope is give it to `setScopeResolver()`, since the bus and the
+  state inside it are the library's own.
 
   `@magicdoor/magic-use-case-core` is internal and never published — it is bundled into each
   adapter, so the adapters' exports are the entire supported API surface.
