@@ -56,13 +56,13 @@ never touches the UI. And there is **no arrow from the component to the gateway*
 
 Five kinds of thing, each with one job:
 
-| Layer            | May                                           | May not                                             |
-| ---------------- | --------------------------------------------- | --------------------------------------------------- |
-| **Component**    | call use cases, render a model                | call a gateway, format, filter, hold business state |
-| **Presentation** | read state, derive what is shown              | run a use case, cause a side effect, write anything |
-| **Use case**     | write state, decide, sequence, call gateways  | touch the DOM or browser APIs                       |
-| **Gateway**      | cross the process boundary, return your types | write state, touch the UI                           |
-| **State**        | be the one truth                              | be written from anywhere but a use case             |
+| Layer            | May                                           | May not                                                          |
+| ---------------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| **Component**    | call use cases, render a model                | touch state, call a gateway, format, filter, hold business state |
+| **Presentation** | read state, derive what is shown              | run a use case, cause a side effect, write anything              |
+| **Use case**     | write state, decide, sequence, call gateways  | touch the DOM or browser APIs                                    |
+| **Gateway**      | cross the process boundary, return your types | write state, touch the UI                                        |
+| **State**        | be the one truth                              | be written from anywhere but a use case                          |
 
 A numbered chapter each follows, in that order. [Quick start](#quick-start) then builds one feature out of all five.
 
@@ -88,6 +88,11 @@ menu is expanded, an uncommitted keystroke on its way to an edit use case.
 
 **It does not hold** a `fetch`, a format, a filter, a sort, a business rule, a try/catch, or a decision about what the
 app should do next. Every one of those has a home, and it is not here.
+
+**It never touches application state.** Not a read, not a write — a component has no access to it at all. It asks for
+a change by executing a use case, and it learns what happened by rendering a presentation's model. That is the whole
+of its relationship with state, and it is why the two hooks above are the entire API: there is no third one that
+reaches the state itself.
 
 It is also the only part of your application that knows which UI framework you use — which is why it is the part you
 rewrite when you move to another one, and the part with no tests worth writing.
@@ -122,12 +127,16 @@ Which means: export presentations at module scope and pass them by reference.
 export const presentTenants: Presentation<AppState, PresentableTenants> = (state) => ({ … });
 usePresenter(presentTenants);
 
-// not shared: a new function on every render, and it captures stale props
+// not shared: a new function on every render, and it captures stale props.
+// do this and I will look for you, I will find you, and I will explain the
+// difference — I have a special set of skills and a slightly Irish accent.
 usePresenter((state) => ({ names: state.tenants.map(() => props.format) }));
 ```
 
-An inline presentation still works, it just runs on its own and sees only the props of the render that created it. A
-presentation derives its model from state alone, so there is rarely a reason to write one.
+**Never write one inline.** A presentation derives its model from state alone, so an inline one gains nothing and
+loses two things: it runs on its own instead of sharing the single model every other screen is reading, and it closes
+over the props of the render that created it, so it is stale the moment they change. There is no case where the
+inline version is the right answer — give it a name, export it, and pass the name.
 
 > [!NOTE] **`Presenter` is exported too**, and it is what `usePresenter` is built on: it holds a presentation, reruns
 > it on every state change, and hands the model to whoever subscribed. Reach for it only to wire a presentation into
@@ -138,6 +147,17 @@ presentation derives its model from state alone, so there is rarely a reason to 
 > keeps the store it created. Passing a different function on a later render does not swap it, so
 > `usePresenter(isAdmin ? presentAdmin : presentUser)` keeps whichever was there first. Choose the presentation with
 > the component, not inside it: render a different component, or make the branch part of the model.
+>
+> Or hold all of them. Declare a presenter for each and read whichever the moment calls for:
+>
+> ```ts
+> const { model: admin } = usePresenter(presentAdmin);
+> const { model: user } = usePresenter(presentUser);
+> // ...then render from admin or user, branching as often as you like
+> ```
+>
+> Nothing is wasted by holding two or three. Each model is built once per state change and shared with every other
+> screen reading the same presentation, so a second presenter adds a subscription, not a second run.
 
 ### A model is rebuilt, but the screen is not
 
@@ -359,18 +379,51 @@ When runs really are concurrent, fix it inside the use case rather than in the c
 
 ```ts
 protected async runLogic(leaseId: string) {
+  this.getState().selectedLeaseId = leaseId;                 // what is wanted, recorded before the wait
   const lease = await leaseGateway.get(leaseId);
-  if (this.getState().selectedLeaseId !== leaseId) return;   // superseded; drop it
-  this.getState().selectedLease = lease;
+  if (this.getState().selectedLeaseId !== leaseId) return;   // something else is wanted now; drop it
+  this.getState().selectedLease = lease;                     // what has arrived
 }
 ```
+
+Two fields, and both earn their place: the id is what the screen is asking for, the lease is what has been loaded for
+it. Comparing `selectedLease?.id` instead would not work — at that point it still holds the *previous* lease, so the
+run that should win would drop its own result.
 
 Reach for those rather than a request id or a cancellation token: the problem is not knowing _which_ run you are, it
 is writing somewhere two runs share.
 
-> [!NOTE] The key is `JSON.stringify(params)`, and a `Set` or a `Map` stringifies to `{}` — so two calls carrying
-> different ones look identical and the second joins the first. Pass an id or an array, and keep the richer shape in
-> state.
+#### Two screens, one use case, different filters
+
+The common shape of all this: two screens showing the same data filtered differently, each loading it for itself.
+
+```ts
+// the open-requests screen                 // the closed-requests screen
+loadRequests({ status: "open" });           loadRequests({ status: "closed" });
+```
+
+**They do not coalesce.** Different parameters are a different key, so both runs happen and both requests go out —
+which is what you want, because they are asking for different things.
+
+What they do share is where the answer lands. Both writing `state.requests` means the second overwrites the first, and
+whichever screen's request was slower is the one showing the other's data — no error, and a screen that looks merely
+out of date rather than wrong. So key the state by the question each run asked:
+
+```ts
+protected async runLogic(filter: RequestFilter) {
+  const requests = await requestGateway.list(filter);
+  this.getState().requestsByStatus[filter.status] = requests; // one entry per question
+}
+```
+
+Each presentation then reads its own entry, the two runs never touch the same place, and the order they finish in
+stops mattering.
+
+> [!WARNING] **Do not put a** `Set` **or a** `Map` **in a filter.** The de-duplication key is `JSON.stringify(params)`,
+> and both stringify to `{}` — so `{ statuses: new Set(["open"]) }` and `{ statuses: new Set(["closed"]) }` are the
+> same key, the second screen joins the first run instead of making its own, and it renders data it never asked for.
+> Filters are where this bites, because a set of selected values is such a natural thing to pass. Use an array — and
+> sort it, so the same selection made in a different order is the same key.
 
 ### Progress, for work the user watches
 
@@ -431,6 +484,34 @@ class SubmitRequestUseCase extends BaseUseCase {
   }
 }
 ```
+
+That works for one inner step. **Hand the same reporter to several and the bar restarts for each**, because what a
+use case reports is absolute — the number it passes is the number the screen shows, and the last one to report wins.
+Five steps each counting themselves from 0 to 100 give you five bars, played in sequence.
+
+So give each step the slice of the bar it owns, and let it go on counting itself from 0 to 100 in ignorance of the
+rest:
+
+```ts
+class SubmitRequestUseCase extends BaseUseCase {
+  protected async runLogic(values: RequestValues) {
+    await new ValidateRequestUseCase(this.share(0, 10)).execute(values);
+    await new CreateRequestUseCase(this.share(10, 70)).execute(values);
+    await new AttachFilesUseCase(this.share(70, 95)).execute(values);
+    await new NotifyManagerUseCase(this.share(95, 100)).execute(values);
+  }
+
+  /** One step's reporter: its own 0-100 becomes the part of the bar it was given. */
+  private share(from: number, to: number) {
+    return (percent: number) => this.onProgress?.(Math.round(from + ((to - from) * percent) / 100));
+  }
+}
+```
+
+Each child stays unaware it is part of anything larger, which is what lets it be used on its own screen too. The
+widths are a guess at how long each step takes, not an equal split between them — the bar's job is to move at a rate
+the user believes, so give the slow step the room it needs. A step that reports nothing at all simply leaves the bar
+where the step before it finished.
 
 That is the one thing progress needs that state does not: it is not global, it belongs to the run the screen started,
 so it travels by constructor rather than through the scope.
@@ -643,10 +724,13 @@ The one truth. A plain, mutable object holding everything the app knows — not 
 request went. Only a use case may write to it; everything else reads.
 
 ```ts
-class AppState {
-  tenants: Tenant[] = [];
-  selectedLeaseId?: string;
+export interface AppState {
+  tenants: Tenant[];
+  selectedLeaseId?: string; // what the screen is asking for
+  selectedLease?: Lease; // what has been loaded for it
 }
+
+export const createAppState = (): AppState => ({ tenants: [] });
 ```
 
 How writing to it works — when you may, what happens when you do, and how it comes into being:
@@ -659,17 +743,61 @@ this.getState().tenants.push(tenant);
 this.getState().selectedLease = lease;
 ```
 
-Immutability is usually adopted to buy two things: knowing _when_ something changed, and stopping code from changing
-it behind your back. This library gives you both by other means — writes are confined to a running use case, and every
-change is announced when the app goes quiet. The guarantees arrive through the boundary rather than through the data
-structure.
+Immutability is usually adopted to buy three things: knowing _when_ something changed, stopping code from changing it
+behind your back, and being safe when several things are in flight at once. The first two arrive here by other means —
+writes are confined to a running use case, and every change is announced when the app goes quiet. The guarantees come
+through the boundary rather than through the data structure.
+
+The third is worth separating into the part that is free and the part that is not. **A reader can never see a
+half-written state**, because JavaScript runs one thing at a time: nothing interleaves inside a synchronous block, so
+a presentation always derives its model from a state that is whole. A frozen tree buys you nothing there that the
+runtime has not already given you, and the readonly view a presentation receives means it cannot be changed underneath
+a screen mid-render either.
+
+**Where it does cost you something is a run that writes on both sides of an** `await`**.** Giving up the thread lets
+another run write in the gap, so the object ends up holding a field from each:
+
+```ts
+protected async runLogic(edit: Edit) {
+  this.getState().form.name = edit.name;
+  const email = await addressBook.resolve(edit.name); // another run writes the form here
+  this.getState().form.email = email;                 // ...and this lands on top of it
+}
+```
+
+Be honest about the comparison: **this is the one thing a frozen tree really does buy.** A reducer commits a whole
+value in a single synchronous step, so you get one run's form or the other's and never a blend. It still does not
+decide *which* — the second commit wins either way, and the loser is the slower request rather than the later one —
+but it does rule out the mixture.
+
+You get the same guarantee here by writing the way a reducer does: **do the waiting first, then write in one
+uninterrupted block.** Nothing can interleave inside it, because nothing yields inside it.
+
+```ts
+protected async runLogic(edit: Edit) {
+  const email = await addressBook.resolve(edit.name); // all the waiting, up front
+  const form = this.getState().form;                  // ...then nothing yields
+  form.name = edit.name;
+  form.email = email;
+}
+```
+
+> [!WARNING] **Do not carry a reference to part of state across an** `await`**.** If another run replaces that branch
+> while you are gone, your reference is left pointing at the object it replaced, and your writes go somewhere nothing
+> reads — no error, no event, no clue. Reach for `getState()` again after every `await` rather than holding what it
+> returned.
+
+Beyond that, the rest is sequencing, and it is fixed by sequencing: `await` your use cases, and key state by what it
+describes so two runs cannot land in the same place at all. [One run, not five](#one-run-not-five) is that argument in
+full.
 
 What you save is the ceremony: no action types, no reducer per slice, no `{...state, a: {...state.a, b: {...state.a.b,
 c}}}` to change one nested field — which is where a surprising share of state bugs actually live.
 
 You _can_ work immutably, and the library supports it fully (see below). It earns its keep in narrow cases —
-time-travel debugging, or reference equality as a memoization shortcut across a very large tree. For most applications
-it is effort without a return, and the honest default is to mutate.
+time-travel debugging, reference equality as a memoization shortcut across a very large tree, or a branch that several
+runs really do write across their awaits. For most applications it is effort without a return, and the honest default
+is to mutate.
 
 `getState()` returns a deep proxy that accepts writes only while a use case is running. Anywhere else — a component, a
 presentation, a module holding a reference — the write throws:
@@ -698,17 +826,17 @@ approach where branches are replaced with new values. Both are allowed in the sa
 case:
 
 ```ts
-class AppState {
-  log: string[] = []; // mutated in place
-  tenants: readonly Tenant[] = Object.freeze([]); // replaced wholesale
+interface AppState {
+  log: string[]; // mutated in place
+  tenants: readonly Tenant[]; // replaced wholesale
 }
 
 class AddTenantUseCase extends BaseUseCase {
-  protected async runLogic(name: string) {
+  protected async runLogic(tenant: Tenant) {
     const state = this.getState();
 
-    state.log.push(`adding ${name}`);
-    state.tenants = Object.freeze([...state.tenants, new Tenant(name)]);
+    state.log.push(`adding ${tenant.name}`);
+    state.tenants = Object.freeze([...state.tenants, tenant]);
   }
 }
 ```
@@ -764,13 +892,19 @@ The object returned from `initializeState()` is deep-cloned. The caller keeps th
 application state — writing to it has no effect and emits nothing:
 
 ```ts
-const original = new AppState();
+const original = createAppState();
 // ...after the use case has run
 original.tenants.push(tenant); // legal, but changes nothing
 ```
 
-`getState()` is the only way to reach live state. The clone preserves prototypes, so class-based state stays
-class-based: `instanceof` holds and methods still work.
+`getState()` is the only way to reach live state. The clone preserves prototypes, so a class works if you want one:
+`instanceof` holds and methods still work.
+
+> [!WARNING] **A class rules out handing state to the browser.** Prototypes cannot be serialized, so a server render
+> that reaches [handing state to the browser](#handing-the-state-to-the-browser) throws rather than shipping the fields
+> without the behavior. The page still renders on the server — it is the handover that fails — but the browser then
+> starts from nothing and fetches it all again. Plain objects keep that door open, which is why they are what the
+> examples use.
 
 > [!NOTE] `#private` **fields cannot be cloned.** There is no reflection for them, so a method reading `this.#field`
 > on the clone throws `Cannot read private member`. Use TypeScript's `private` or a `_` prefix — both are ordinary
@@ -809,17 +943,17 @@ Not "each gateway does its own `fetch`". There are three layers, and each knows 
 
 > [!IMPORTANT]
 > **Everything named in this chapter is yours to write.** `Gateway`,
-> `NetworkManager`, `MagicRequest`, `AuthTokenStore`, `RenderContext` — none of
+> `NetworkManager`, `NetworkRequest`, `AuthTokenStore`, `RenderContext` — none of
 > them come from the library, and none of them are importable. They are the shape
 > that has worked, shown so you can copy it, not an API to call.
 >
-> `MagicRequest` in particular is worth defining yourself rather than passing the
+> `NetworkRequest` in particular is worth defining yourself rather than passing the
 > platform's `Request` around: it is a plain object you own, so it can carry
 > whatever your transport needs — a retry budget, a trace id, a timeout, an abort
 > signal — and it stays inspectable in a test.
 >
 > ```ts
-> export interface MagicRequest {
+> export interface NetworkRequest {
 >   url: string;
 >   method: RequestMethod;
 >   headers: Headers;
@@ -836,13 +970,13 @@ Not "each gateway does its own `fetch`". There are three layers, and each knows 
 
 ```ts
 export interface NetworkManager {
-  sendRequest(request: MagicRequest): Promise<Response>;
+  sendRequest(request: NetworkRequest): Promise<Response>;
 }
 
 export class BaseNetworkManager implements NetworkManager {
   constructor(private readonly context: RenderContext = renderContext) {}
 
-  sendRequest = async (request: MagicRequest): Promise<Response> => {
+  sendRequest = async (request: NetworkRequest): Promise<Response> => {
     const url = request.url.startsWith('http') ? request.url : `${BASE}${request.url}`;
     return fetch(this.resolve(url), { method: request.method, headers: request.headers, … });
   };
@@ -869,24 +1003,24 @@ export class Gateway {
 
   private static refreshing?: Promise<void>; // shared: one refresh, not one per gateway
 
-  protected sendRequest = async (request: MagicRequest): Promise<Response> => {
+  protected sendRequest = async (request: NetworkRequest): Promise<Response> => {
     let response = await this.transmit(request);
 
     if (response.status === 401) {
       try {
         await this.refreshTokens(); // once, under a cross-tab lock
       } catch {
-        throw new Unauthorized();
+        throw new UnauthorizedError();
       }
       response = await this.transmit(request);
     }
-    if (response.status === 401) throw new Unauthorized();
+    if (response.status === 401) throw new UnauthorizedError();
     if (!response.ok) throw errorFor(response.status, await bodyOf(response));
 
     return response;
   };
 
-  private transmit = async (request: MagicRequest): Promise<Response> => {
+  private transmit = async (request: NetworkRequest): Promise<Response> => {
     const token = (await this.tokens?.getAuthInfo())?.token;
     if (token) request.headers.set("Authorization", `Bearer ${token}`);
 
@@ -898,6 +1032,27 @@ export class Gateway {
   };
 }
 ```
+
+This is where **authentication stops being anybody's problem.** Every request reads the token from the
+`AuthTokenStore` and attaches it here, so no gateway method mentions a token, no use case passes one, and no component
+has ever held one. A 401 is answered the same way and just as invisibly: refresh once — under a lock every gateway
+shares, so ten requests failing together produce one refresh, not ten — then replay the request that failed. The use
+case that called `list()` is never told any of it happened. It gets its tenants, or it gets an `UnauthorizedError`
+it can act on.
+
+Which leaves signing in and out as ordinary writes to the store — a use case puts tokens in, or clears them — and
+every request after that picks up the change on its own. The store is the only thing in your application that knows
+what a token is, and the only place to change how one is kept:
+
+```ts
+export interface AuthTokenStore {
+  getAuthInfo(): AuthInfo | Promise<AuthInfo>;
+  setAuthInfo(info: AuthInfo): void | Promise<void>;
+}
+```
+
+Its `Promise` returns are what let it be something other than `localStorage` — a cookie read on the server, a keychain
+on a native shell — without a single gateway changing.
 
 #### 3. The concrete gateways — one per subject, each given the same instance
 
@@ -932,7 +1087,7 @@ subtly wrong. `refreshing` being `static` is the point: two gateways that 401 at
 instead of racing to spend the same refresh token twice.
 
 **Failures become names before they leave.** A status code is an HTTP fact, and nothing above the gateway should ever
-see one. `401` becomes `Unauthorized`, a `fetch` that throws — offline, DNS, CORS, a canceled request — becomes
+see one. `401` becomes `UnauthorizedError`, a `fetch` that throws — offline, DNS, CORS, a canceled request — becomes
 `FailedToReachServer`, and a body carrying an error code becomes the error that code names. A use case branches on
 `instanceof`, never on a number.
 
@@ -957,7 +1112,7 @@ class TenantGateway extends Gateway {
     });
     const body = (await response.json()) as { id: string; full_name: string }[];
 
-    return body.map((row) => new Tenant(row.id, row.full_name)); // your type
+    return body.map((row) => ({ id: row.id, name: row.full_name })); // your shape, not theirs
   }
 }
 ```
@@ -968,6 +1123,16 @@ change in one file.
 
 Name the mapped result after the concept — `Tenant`, `PaymentMethod`. Do not name it `TenantDto`; the DTO is the thing
 you just mapped _away from_, and it does not survive the gateway.
+
+**Plain data is the default worth reaching for.** `Tenant` here is an `interface` and the gateway returns object
+literals — no constructor, no methods, nothing but the fields. What it returns is on its way into application state,
+and state made of plain data is what can be [handed to the browser](#handing-the-state-to-the-browser) after a server
+render.
+
+A class works too, and the clone that adopts your state preserves prototypes, so `instanceof` holds and methods still
+run. It costs you that one thing — a class instance cannot be serialized, so the handover throws and the browser
+starts from nothing. Worth it for a domain type that genuinely earns its methods; not worth it for a bag of fields
+with a constructor around it.
 
 ### Generated clients stop at the gateway
 
@@ -1049,10 +1214,10 @@ class PaymentGateway {
     const result = await stripe.createPaymentMethod(toStripeShape(details));
 
     if (result.error) throw declineFor(result.error.code); // your error
-    return new PaymentMethod(
-      result.paymentMethod.id,
-      result.paymentMethod.card.last4,
-    );
+    return {
+      id: result.paymentMethod.id,
+      last4: result.paymentMethod.card.last4,
+    };
   }
 }
 ```
@@ -1135,10 +1300,10 @@ The failure is reported to `onError` **exactly once**, by the outermost run, so 
 happened at the top or five levels down. A caller that catches decides what it means, and only what that caller throws
 is reported — the next section is the four ways that goes.
 
-Two rules underneath it. Catching and _not_ rethrowing reports nothing at all, because the failure was handled;
-`report()` is how a use case recovers and still tells the screen. And a use case that writes state and then throws
-still announces what it wrote, so anything it managed before failing — a partial result, a cleared selection — reaches
-the screen rather than being lost with the run.
+Two rules underneath it. Catching and _not_ rethrowing reports nothing at all, because the failure was handled — so a
+handled failure the user still has to see belongs in state, where a presentation can put it next to the thing that
+failed. And a use case that writes state and then throws still announces what it wrote, so anything it managed before
+failing — a partial result, a cleared selection — reaches the screen rather than being lost with the run.
 
 ### The use case decides what a gateway failure means
 
@@ -1160,11 +1325,11 @@ class LoadDashboardUseCase extends BaseUseCase {
       this.getState().tips = [];
     }
 
-    // 3. swallow it, but tell the screen anyway
+    // 3. record it — the user is the one who has to act on it
     try {
       this.getState().avatars = await fileGateway.resolve(ids);
-    } catch (error) {
-      this.report(error as Error);
+    } catch {
+      this.getState().avatarsFailed = true; // a presentation turns this into a retry prompt
     }
 
     // 4. translate it — the caller needs a different name for it
@@ -1182,11 +1347,17 @@ The same `NotFound` from the same gateway is fatal in one use case and irrelevan
 business logic, which is why it lives here and not in the gateway — a gateway that decided for you would have to know
 which caller it had, and it does not.
 
-Two consequences worth holding on to:
+Three consequences worth holding on to:
 
 - **Swallowing is a decision, and it is silent.** Catching without rethrowing reports nothing at all — no dialog, no
   `onError`. That is right when the app genuinely copes, and wrong when you merely did not want to think about it.
-  When the app copes _and_ the screen should still know, use `report()`.
+  When the app copes _and_ the screen should still say something, write that to state and let a presentation phrase
+  it: a failure the user can act on belongs next to the thing that failed, not in a dialog over the top of it.
+- **Telemetry is not the use case's job.** Sending a failure to Sentry and showing it to the user are different
+  decisions, and both are made in one place — `onWillReportError` captures whatever is worth knowing about and
+  returns `false` for anything the user should not be interrupted by. A use case throwing the right name is all that
+  handler needs to tell them apart. See [Errors the screen shows inline](#errors-the-screen-shows-inline) for the
+  three destinations side by side.
 - **Rethrowing something else replaces the original.** Only what you throw is reported, so the name you choose is the
   name the user's dialog is built from. Preserve the cause if it matters: `new NoLedgerForThisLease({ cause: error
   })`.
@@ -1198,7 +1369,7 @@ Two consequences worth holding on to:
 A use case should branch on what went wrong, not on a number:
 
 ```ts
-export class Unauthorized extends Error {}
+export class UnauthorizedError extends Error {}
 export class TenantsUnavailable extends Error {}
 export class PaymentDeclined extends Error {
   constructor(readonly reason: DeclineReason) {
@@ -1345,8 +1516,10 @@ const stopNavigating = onNavigation((url) => router.go(url));
 ```
 
 They hand back an unsubscribe function and nothing else — there is no way to reach the bus itself, or to emit on it. A
-use case emits by calling `navigate()` or `report()`; everything else listens. Tests use the same pair, so what they
-observe is what a screen would have been told.
+use case puts a url on one channel with `navigate()`, and an error on the other by throwing; everything else listens.
+(`report()` emits on that same error channel without throwing, for a use case that recovers and still wants the
+dialog — rare, and worth a moment's thought each time, since a failure the user has to act on belongs in state.) Tests
+use the same pair, so what they observe is what a screen would have been told.
 
 ## Quick start
 
@@ -1357,16 +1530,21 @@ every piece of it belongs to one of the chapters above.
 
 ---
 
-Application state is an ordinary object or class. The library takes no position on its shape.
+Application state is an ordinary object: a type describing the shape, and a function that builds an empty one.
 
 ```ts
 // state.ts
-export class AppState {
-  tenants: Tenant[] = [];
+export interface AppState {
+  tenants: Tenant[];
 }
 
-export const appState = new AppState();
+export const createAppState = (): AppState => ({ tenants: [] });
+
+export const appState = createAppState();
 ```
+
+A factory rather than a literal, because a server renders many requests and a test runs many cases — each one needs
+its own state, and only a function can hand out a fresh one.
 
 ### 2. Give every use case that state, once
 
@@ -1417,8 +1595,15 @@ export class LoadTenantsUseCase extends BaseUseCase {
 }
 ```
 
-No try/catch. If the gateway throws, the failure propagates, `didSucceed` goes false, and `ErrorHandler` shows it —
-all of which you get already. Catch only when the use case has something to _decide_.
+No try/catch **here**, because this use case has nothing to add: if the gateway throws, the failure propagates,
+`didSucceed` goes false, and `ErrorHandler` shows it — all of which you get already. A `try` that catches and
+rethrows the same error is pure ceremony.
+
+Catch when the use case has something to _decide_ — and it often does. Reclassifying is the usual reason: a `NotFound`
+from the ledger means nothing to a screen, and `NoLedgerForThisLease` means everything, so catch it and throw the name
+that carries the meaning. Recording a failure the user has to act on, or carrying on without what failed, are the
+other two. [The use case decides what a gateway failure
+means](#the-use-case-decides-what-a-gateway-failure-means) sets out all four answers with examples.
 
 `tenantGateway` is your code — the library does not provide one. It is simply the module that owns the `fetch`, and it
 returns your own types rather than the API's:
@@ -1430,7 +1615,7 @@ export const tenantGateway = {
     const response = await fetch("/api/tenants");
     if (!response.ok) throw new TenantsUnavailable();
     const body = (await response.json()) as { id: string; full_name: string }[];
-    return body.map((row) => new Tenant(row.id, row.full_name));
+    return body.map((row) => ({ id: row.id, name: row.full_name }));
   },
 };
 ```
@@ -1548,7 +1733,7 @@ function ErrorDialog({
 
 /** Every failure in the app arrives here. One rule per kind, in one place. */
 function willReport(error: Error): boolean {
-  if (error instanceof Unauthorized) {
+  if (error instanceof UnauthorizedError) {
     signOut(window.location.pathname); // handled: sign out and come back here
     return false; // ...so no dialog
   }
@@ -1741,7 +1926,7 @@ import {
 } from "@magicdoor/magic-use-case-react";
 
 export const givenAppState = (): AppState => {
-  const state = new AppState();
+  const state = createAppState();
   const scope = createScope(state);
   setScopeResolver(() => scope);
   return state;
@@ -1835,7 +2020,7 @@ adds a subscription and a teardown no test asserts on.
 
 ```ts
 it("formats the balance and labels an ended lease closed", () => {
-  const state = new AppState();
+  const state = createAppState();
   state.selectedLease = { id: "l1", currentBalance: 1240, isActive: false };
 
   expect(presentLease(state)).toEqual({

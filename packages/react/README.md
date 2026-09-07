@@ -12,6 +12,7 @@ npm install @magicdoor/magic-use-case-react
 - `UseCase` — base class for your application logic
 - `Presentation` — the type of a function mapping state to a view model
 - `DeepReadonly` — the type of a model as a screen sees it
+- `MagicUseCaseTypes` — augment it with your state type, so `usePresenter` accepts only presentations written against it
 - `useUseCase` — execute a use case, with loading, progress and success state
 - `usePresenter` — subscribe a component to a presentation's model
 - `Presenter` — the presentation holder behind `usePresenter`, for wiring of your own
@@ -19,6 +20,13 @@ npm install @magicdoor/magic-use-case-react
 - `Navigator` — bridges use-case navigation events to your router
 - `onError` / `onNavigation` — subscribe to those two channels directly
 - `createScope` / `setScopeResolver` — one scope per request, for server rendering
+
+### `@magicdoor/magic-use-case-react/server`
+
+Kept behind its own entry point because it reaches for `node:async_hooks`, which no browser bundle should carry.
+
+- `runInRequestScope` — run a render with a scope belonging to that request, rather than to the process
+- `serializedStateScript` — the state that render produced, as a script the browser runs before it hydrates
 
 New to it? The [main README](https://github.com/MagicDoorInc/magic-use-case#readme)
 introduces the five players, walks a complete feature in five steps, and sets out
