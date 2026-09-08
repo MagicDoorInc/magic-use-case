@@ -1,17 +1,18 @@
 # magic-use-case
 
-Clean-architecture use cases and presentations for front-end TypeScript — a small, extensible structure for organizing
-application logic outside your UI framework.
+A hyper-opinionated architecture disguised as a library. Use cases, presentations and gateways for front-end
+TypeScript, with the rules between them enforced rather than recommended — so your application logic lives outside
+your UI framework and stays there.
 
 The idea is one sentence: **your application's behavior should not live in your components.** What the app _does_ goes
 in a use case, what the screen _shows_ comes from a presentation, and the component draws pixels and forwards clicks.
 The library makes that separation real — several of the rules below are enforced by the compiler and at runtime, not
 left to review.
 
-| Package                                               | Framework      | Version |
-| ----------------------------------------------------- | -------------- | ------- |
-| `[@magicdoor/magic-use-case-react](./packages/react)` | React ≥17      | `0.1.0` |
-| `[@magicdoor/magic-use-case-solid](./packages/solid)` | SolidJS >1.9.3 | `0.1.0` |
+| Package                                                 | Framework      | Version                                                                                                                                  |
+| ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@magicdoor/magic-use-case-react`](./packages/react)   | React ≥17      | [![npm](https://img.shields.io/npm/v/@magicdoor/magic-use-case-react)](https://www.npmjs.com/package/@magicdoor/magic-use-case-react) |
+| [`@magicdoor/magic-use-case-solid`](./packages/solid)   | SolidJS >1.9.3 | [![npm](https://img.shields.io/npm/v/@magicdoor/magic-use-case-solid)](https://www.npmjs.com/package/@magicdoor/magic-use-case-solid) |
 
 ```bash
 npm install @magicdoor/magic-use-case-react   # or @magicdoor/magic-use-case-solid
@@ -21,7 +22,46 @@ Requires Node ≥18. The two adapters share one core and behave identically. The
 only differences are the import, the JSX, and that what the hooks return are accessors — `model()` and `isLoading()`
 rather than `model` and `isLoading`.
 
-## The shape of a feature
+Every example in this document is one application: a property-management app with tenants, leases and their units,
+rent payments, and maintenance requests. A name means the same thing wherever it appears.
+
+---
+
+# Contents
+
+**Read first — the doctrine.** Short, and everything after it assumes you have.
+
+- [The shape of a feature](#the-shape-of-a-feature) — the five players and what each may and may not do
+- [The rules](#the-rules) — every rule in one list, with what the library enforces and what you hold
+- [Glossary](#glossary) — the words the rest of the document leans on, one line each
+
+**Then build one feature.**
+
+- [Quick start](#quick-start) — all five players, one feature, five steps
+- [What this buys you](#what-this-buys-you)
+- [How this differs from Redux and Zustand](#how-this-differs-from-redux-and-zustand)
+
+**Then each player in depth** — the reasoning behind every rule, and what goes wrong when it is broken.
+
+1. [Components](#1-components)
+2. [Presentations](#2-presentations)
+3. [Use cases](#3-use-cases) — [one run, not five](#one-run-not-five) · [progress](#progress-for-work-the-user-watches) · [higher-order use cases](#higher-order-use-cases) · [detached work](#work-the-caller-does-not-wait-for)
+4. [Application state](#4-application-state)
+5. [Gateways](#5-gateways) — [the network manager](#every-gateway-is-built-on-one-network-manager) · [map the response](#map-the-response-always) · [third-party SDKs](#third-party-sdks)
+
+- [Errors](#errors)
+- [Testing](#testing)
+- [Server-side rendering](#server-side-rendering)
+
+**Reference.**
+
+- [API at a glance](#api-at-a-glance)
+- [When something throws](#when-something-throws)
+- [Repository layout](#repository-layout) · [Development](#development)
+
+---
+
+# The shape of a feature
 
 Every feature is the same loop, in both directions:
 
@@ -64,9 +104,469 @@ Five kinds of thing, each with one job:
 | **Gateway**      | cross the process boundary, return your types | write state, touch the UI                                        |
 | **State**        | be the one truth                              | be written from anywhere but a use case                          |
 
-A numbered chapter each follows, in that order. [Quick start](#quick-start) then builds one feature out of all five.
+[The rules](#the-rules) come next — everything each layer must and must not do, in one list. [Quick start](#quick-start)
+then builds one feature out of all five, and a numbered chapter for each follows, in that order, with the reasoning
+behind every rule and what happens when it is broken.
 
-## 1. Components
+---
+
+# The rules
+
+Every rule the chapters below argue for, in one place. Some the library enforces — the compiler or the runtime stops
+you at the offending line. The rest are convention, and yours to hold; each links to the chapter that says why.
+
+**What the library enforces for you:**
+
+- **Only a use case may write state.** `getState()` returns a proxy that refuses writes outside a running use case —
+  at runtime, at the offending line. See [Application state](#4-application-state).
+- **A presentation can never write.** It receives a fully readonly view, whatever else is running.
+- **A component can never write the model.** `usePresenter` returns `DeepReadonly<TModel>`, so it is a compile error
+  before it is a runtime one. See [The model is readonly](#the-model-is-readonly).
+- **A use case cannot replace live state.** Bootstrapping happens once; `resetAppState()` is the only way back. See
+  [Bootstrapping](#bootstrapping).
+- **Server rendering cannot leak one user's state into another's.** Both server builds resolve a scope per request,
+  so two requests never share state, the event bus, or a model — and rendering outside a request throws rather than
+  falling back to a shared one. See [Server-side rendering](#server-side-rendering).
+- **A presentation cannot read a shape the app never emits.** Once the app names its state type through
+  `MagicUseCaseTypes`, `usePresenter` rejects any presentation written against a different one, at compile time. See
+  [Quick start, step 2](#2-give-every-use-case-that-state-once).
+
+**What is convention, and yours to hold:**
+
+- **Gateways.** The library has no `Gateway` type. Anything crossing the process boundary belongs behind one — see
+  [Gateways](#5-gateways) and [Third-party SDKs](#third-party-sdks).
+- **Components call use cases, not each other's helpers.** If a screen needs a value, the value belongs in the model.
+  See [Components](#1-components).
+- **Validation lives in the use case that owns the rule**, stated once. A form surfaces validation; it does not
+  re-implement it.
+- **Form state is application state**, and so are the errors on it — see [Errors the screen shows
+  inline](#errors-the-screen-shows-inline).
+- **Enumerable business values are enums or** `as const`, never repeated string literals, and never compared against
+  display text.
+- **Either layer may navigate, and the question is whose decision it is.** The use case navigates when _going there is
+  the outcome_ — sign-in succeeded, the session expired, the deep link is honored. The UI navigates when the route is
+  a consequence of what is on screen: a row click, a tab, a back button. Derive the path in the presentation, call the
+  router in the component. The test is whether the rule survives a redesign — "after paying, go to the receipt" does,
+  "clicking this row opens that page" does not.
+- **Timers belong to the UI**, which calls a use case when one fires — a debounce, an animation, a screen that
+  refreshes on an interval. The exception is a timer pacing a request or a connection, which belongs in the gateway.
+  Neither belongs in a use case. See [Timers](#timers).
+- **Sequencing use cases is itself a use case** — not a hook, not a context, not a component effect. See [Higher-order
+  use cases](#higher-order-use-cases).
+- **Don't abstract early.** "Several pages use it" is not a reason; leave the duplication until the business boundary
+  is stable.
+
+**And the ones that come up on every review** — each is a paragraph in its chapter, and each is a review comment
+waiting to happen:
+
+- **Never write a presentation inline.** Export it at module scope and pass it by reference; sharing is keyed on the
+  function's identity. See [Presentations](#2-presentations).
+- **`await` your use cases.** `void execute(...)` is for work that needs no answer, and it costs you ordering. See
+  [Different parameters are different work](#different-parameters-are-different-work--so-await-them).
+- **Key state by what it describes** — `state.leasesById[leaseId]`, not `state.selectedLease` — so two runs cannot
+  overwrite each other. See [Two screens, one use case](#two-screens-one-use-case-different-filters).
+- **Do the waiting first, then write in one uninterrupted block**, and never carry a reference to part of state across
+  an `await`. See [Application state](#4-application-state).
+- **No `Set` or `Map` in a use case's parameters.** The de-duplication key is `JSON.stringify(params)`, and both
+  stringify to `{}`. Use a sorted array. See [One run, not five](#one-run-not-five).
+- **Import gateways as module singletons; never construct one in a use case.** Inject the network manager into the
+  gateway once, at its `export const`. See [Where the gateways come from](#where-the-gateways-come-from).
+- **Map every response at the gateway. Always.** `return response.json()` hands the backend's shape to the whole app.
+  Generated clients and SDK objects stop at the gateway too. See [Map the response](#map-the-response-always).
+- **No try/catch in components.** Every failure reaches `ErrorHandler` on its own; a use case catches only when it
+  has something to decide. See [Errors](#errors).
+- **Errors carry a code, never a sentence.** The wording is the presentation's job. See [Define your own
+  errors](#define-your-own-errors).
+- **Do not write component tests.** Test presentations and use cases; everything else is covered through them. See
+  [Testing](#testing).
+
+---
+
+# Glossary
+
+The words the chapters use before they explain them. One line each; the chapter has the rest.
+
+- **Run** — one `execute()` of a use case with one set of parameters. Runs are keyed by the class and
+  `JSON.stringify(params)`; a second call with the same key while the first is in flight joins it rather than starting
+  another.
+- **Announce** — what a run does when it finishes: it tells every presenter that state changed, models are rebuilt,
+  screens update. Only a run with no caller announces; everything written beneath it travels in that one announcement.
+- **Nested run** — a use case constructed and awaited inside another's `runLogic` (`await new X().execute()`). It has a
+  caller, so it writes state but does not announce; its caller does, once, when the whole flow finishes.
+- **Detached run** — started with `this.detach(SomeUseCase, params)`. Not nested and nobody waits for it: the starter
+  announces its own changes at once, the detached run announces its own when it lands, and its failure is reported
+  rather than thrown.
+- **Higher-order use case** — a use case whose `runLogic` sequences other use cases and branches on what they left in
+  state. A flow is a use case, not a hook, a context, or an effect.
+- **Mutation window** — the span while a use case is running: the only time `getState()` accepts writes. It is
+  time-based, not call-based, so anything that happens to run while a use case awaits is inside it.
+- **Scope** — everything that makes up one running application: the state, the event bus, the de-duplication and
+  bootstrap bookkeeping, and the model built for each presentation. A browser has one for the life of the page; a
+  server has one per request; a test gets its own from `createScope()`.
+- **Bootstrap** — the first `execute()` in a scope calling `initializeState()` exactly once to adopt a starting state.
+  `resetAppState()` is the only way back to an uninitialized scope.
+- **Presentation** — a pure function from state to a model. Yours; the unit you test.
+- **Presenter** — the library's object that holds one presentation, reruns it on every announcement, and hands the
+  model to its subscribers. `usePresenter(presentation)` makes one; you never write one and never test one.
+- **Model** (view model) — what a presentation returns and a component renders: already formatted, filtered and
+  labeled. It reaches the component as `DeepReadonly<TModel>`, and one model is shared by every screen using that
+  presentation.
+- **Reconciled store** — what `usePresenter` puts each new model through, keeping the parts that did not change so the
+  renderer only touches what did.
+- **Gateway** — your class, not the library's: the one place a request leaves the process. It returns your own types
+  to the use case that asked, and it never writes state or touches the UI.
+
+---
+
+# Quick start
+
+All five players, in one feature, in five steps. Nothing here is pseudo-code — it is a complete, working feature, and
+every piece of it belongs to one of the chapters that follow.
+
+## 1. Describe the state
+
+Application state is an ordinary object: a type describing the shape, and a function that builds an empty one.
+
+```ts
+// state.ts
+export interface AppState {
+  tenants: Tenant[];
+}
+
+export const createAppState = (): AppState => ({ tenants: [] });
+
+export const appState = createAppState();
+```
+
+A factory rather than a literal, because a server renders many requests and a test runs many cases — each one needs
+its own state, and only a function can hand out a fresh one.
+
+## 2. Give every use case that state, once
+
+One base class per app supplies the initial state. Every use case extends it, so the state type is named once rather
+than on every use case you write.
+
+```ts
+// baseUseCase.ts
+import { UseCase } from "@magicdoor/magic-use-case-react";
+import { AppState, appState } from "./state";
+
+export abstract class BaseUseCase extends UseCase<AppState> {
+  protected async initializeState() {
+    return appState;
+  }
+}
+```
+
+Returning the module-level `appState` is fine even though step 1 asked for a factory: the library deep-clones what
+`initializeState()` returns and the clone becomes the live state, so the export is a template rather than the thing
+itself — see [State is adopted, not borrowed](#state-is-adopted-not-borrowed). Tests skip this path and hand a fresh
+`createAppState()` straight to `createScope()`, which is where the factory earns its keep.
+
+Then tell the library which type that is, so a presentation cannot quietly declare a different one:
+
+```ts
+declare module "@magicdoor/magic-use-case-react" {
+  interface MagicUseCaseTypes {
+    state: AppState;
+  }
+}
+```
+
+`usePresenter` now accepts only presentations written against `AppState`. Without it, a presentation's state type is
+whatever the presentation claims, so one written against the wrong shape compiles cleanly and throws at runtime — on
+the screen, not in the tests.
+
+## 3. Write what the app does
+
+A use case owns one piece of behavior. `runLogic` is the whole of it, and `getState()` is the only way to reach live
+state.
+
+```ts
+// loadTenantsUseCase.ts
+export class LoadTenantsUseCase extends BaseUseCase {
+  protected async runLogic() {
+    this.getState().tenants = await tenantGateway.list();
+  }
+}
+```
+
+No try/catch **here**, because this use case has nothing to add: if the gateway throws, the failure propagates,
+`didSucceed` goes false, and `ErrorHandler` shows it — all of which you get already. A `try` that catches and
+rethrows the same error is pure ceremony.
+
+Catch when the use case has something to _decide_ — and it often does. Reclassifying is the usual reason: a `NotFound`
+from the ledger means nothing to a screen, and `NoLedgerForThisLease` means everything, so catch it and throw the name
+that carries the meaning. Recording a failure the user has to act on, or carrying on without what failed, are the
+other two. [The use case decides what a gateway failure
+means](#the-use-case-decides-what-a-gateway-failure-means) sets out all four answers with examples.
+
+`tenantGateway` is your code — the library does not provide one. It is simply the module that owns the `fetch`, and it
+returns your own types rather than the API's. This is the smallest one that works; [Gateways](#5-gateways) grows it
+into a class on a shared network manager, which is the shape the rest of the document assumes:
+
+```ts
+// tenantGateway.ts
+export const tenantGateway = {
+  async list(): Promise<Tenant[]> {
+    const response = await fetch("/api/tenants");
+    if (!response.ok) throw new TenantsUnavailable();
+    const body = (await response.json()) as { id: string; full_name: string }[];
+    return body.map((row) => ({ id: row.id, name: row.full_name }));
+  },
+};
+```
+
+## 4. Say what the screen shows
+
+A presentation is a **pure function from state to a view model**. All formatting, filtering, sorting and labeling
+happens here — never in the component.
+
+```ts
+// presentTenants.ts
+import type { Presentation } from "@magicdoor/magic-use-case-react";
+
+export interface PresentableTenants {
+  names: string[];
+  countLabel: string;
+  isEmpty: boolean;
+}
+
+export const presentTenants: Presentation<AppState, PresentableTenants> = (
+  state,
+) => ({
+  names: state.tenants.map((tenant) => tenant.name).sort(),
+  countLabel: `${state.tenants.length} tenants`,
+  isEmpty: state.tenants.length === 0,
+});
+```
+
+Export it at module scope. Sharing is by function identity, so every screen that passes this same function shares one
+run of it — see [Presentations](#2-presentations).
+
+## 5. Render it
+
+The component does two things: run use cases, and render a model.
+
+```tsx
+function TenantList() {
+  const { execute: load, isLoading } = useUseCase(LoadTenantsUseCase);
+  const { model } = usePresenter(presentTenants);
+
+  useEffect(() => void load(), []);
+
+  if (isLoading) return <Spinner />;
+  if (!model) return null;
+
+  return (
+    <>
+      <h2>{model.countLabel}</h2>
+      <ul>
+        {model.names.map((name) => (
+          <li key={name}>{name}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+Notice what the component does _not_ contain: no `fetch`, no `.sort()`, no `.map()` to a label, no `tenants.length ===
+0` check, and no try/catch. Each of those has a home, and it is not here. The next chapter is what that discipline
+buys you; the rest of the document is each player in detail.
+
+**You rarely need to track in state whether a use case worked.** `useUseCase` already reports `isLoading`,
+`didSucceed` and `progress` for the run it started, and the failure itself already reaches `ErrorHandler` — so reach
+for those first and let application state hold what the app _knows_, which here is the tenants.
+
+Sometimes you do need it, and that is fine: a fact that must outlive the run, because something loaded on one screen
+is reported on another, or because the panel has to keep saying "couldn't load" long after the hook that ran it has
+gone. Then it is a fact about the app like any other and belongs in state. Just reach for it when the run's own status
+genuinely cannot answer, rather than by default.
+
+## Wire the two events once, at the root
+
+A use case can navigate and can report a failure. Two components deliver those to your app, and you mount them once —
+this is the whole of `app.tsx`:
+
+```tsx
+// app.tsx
+import { ErrorHandler, Navigator } from "@magicdoor/magic-use-case-react";
+
+/** Inside the router, because that is where `useNavigate` is available. */
+function NavigationHandler() {
+  const navigate = useNavigate();
+
+  return (
+    <Navigator
+      onNavigate={(url) =>
+        // a use case may send the tenant off-site — to an identity provider, say
+        url.startsWith("http") ? (window.location.href = url) : navigate(url)
+      }
+    />
+  );
+}
+
+function ErrorDialog({
+  error,
+  onClose,
+}: {
+  error: Error;
+  onClose: () => void;
+}) {
+  return (
+    <dialog open>
+      <p>{messageFor(error)}</p>
+      <button onClick={onClose}>Close</button>
+    </dialog>
+  );
+}
+
+/** Every failure in the app arrives here. One rule per kind, in one place. */
+function willReport(error: Error): boolean {
+  if (error instanceof UnauthorizedError) {
+    signOut(window.location.pathname); // handled: sign out and come back here
+    return false; // ...so no dialog
+  }
+  if (!(error instanceof ValidationFailed)) {
+    Sentry.captureException(error); // worth knowing about; still shown
+  }
+  return true;
+}
+
+export function App() {
+  const { execute: initialize } = useUseCase(InitializeAppUseCase);
+
+  useEffect(() => void initialize(), []);
+
+  return (
+    <ErrorHandler
+      onWillReportError={willReport}
+      renderErrorDialog={ErrorDialog}
+    >
+      <Router>
+        <NavigationHandler />
+        <Routes />
+      </Router>
+    </ErrorHandler>
+  );
+}
+```
+
+`messageFor(error)` is yours: a lookup from error type to copy, which is where the wording lives. The error itself
+carries a _code_, never a sentence — see [Define your own errors](#define-your-own-errors).
+
+`ErrorHandler` takes one more prop, optional: `onDidReportError(error)`, called after `onWillReportError` returned
+`true`, once per failure the dialog is about to show. `onWillReportError` decides; `onDidReportError` is told what was
+decided, so it is the place for anything that should happen only for the failures the user actually sees.
+
+`ErrorHandler` **is the single place every failure in the app arrives** — see [Errors](#errors) for what that buys you
+and how to use it.
+
+In Solid the same file differs only in the JSX and in `useNavigate` coming from `@solidjs/router`; `ErrorHandler` and
+`Navigator` take the same props.
+
+---
+
+# What this buys you
+
+Look back at what you just wrote. Four of the five players — the gateway, the use case, application state and the
+presentation — contain **no React, no Solid, no JSX, no hooks**: no reference to a rendering technology at all. They
+are plain TypeScript classes and functions. Only the component knows what framework you are using.
+
+Which means the boundary is not a diagram, it is a directory you can move:
+
+```
+src/
+  gateways/     ─┐
+  use-cases/     │  plain TypeScript. Copy this into any TypeScript app,
+  state/         │  on any front end, and it works.
+  presenters/   ─┘
+  components/      the only part that is React or Solid
+```
+
+Porting a screen to another framework means rewriting the component and changing one import —
+`@magicdoor/magic-use-case-react` for `@magicdoor/magic-use-case-solid`. The behavior, the network layer, the state
+shape and every formatting rule come across untouched, **and so do their tests**, because none of them ever rendered
+anything.
+
+**Navigation travels too.** A use case says _where to go_, never how to get there:
+
+```ts
+this.navigate("/tenants/42"); // no router imported, no router installed
+```
+
+The one place that knows about React Router, or Solid Router, or `window.location`, is the `<Navigator
+onNavigate={…}>` you mount once. Swap the router and you change that one line.
+
+That is also the honest test of whether you are following the architecture. If moving your `use-cases/` folder to a
+Solid app would break it, something has leaked into it that does not belong.
+
+The same independence holds at the other end. Because every gateway is built on [one network manager](#5-gateways),
+nothing above it knows whether the data arrives over REST, GraphQL, a socket or a native bridge. Your application is
+insulated from the UI framework above and the communication framework below, and what is left between them is the part
+worth keeping.
+
+---
+
+# How this differs from Redux and Zustand
+
+Both are state containers, and this is not one — application state here is a plain object with nothing to install.
+This library exists for two things: to **enforce separation of concerns**, and to **decouple the application from
+the front-end framework**. State management falls out of that; it was never the point. So the comparison that matters
+is not how state is stored but where the fetch goes, where the decision goes, and what stops either from going
+somewhere else.
+
+**Redux** says what it wants, and says it well. Reducers must be pure — the [style
+guide](https://redux.js.org/style-guide/) is explicit that they "must not execute any kind of asynchronous logic (AJAX
+calls, timeouts, promises)". Put as much logic as possible in reducers. Model actions as events, not setters. Async
+logic goes in a thunk, or the listener middleware, or RTK Query, depending. Every one of those is right, and every one
+of them is a recommendation. A reducer that reaches for the network still compiles and still runs. A thunk that grows
+a business rule is a thunk. A component that dispatches `setA`, awaits something, then dispatches `setB` has put the
+sequencing in the UI, and nothing objects. Redux Toolkit's development-mode checks catch a mutated state and a
+non-serializable value; they have no opinion about where the logic went, and neither does the compiler. In practice
+the logic lands wherever the last person put it.
+
+**Zustand** takes the opposite position on purpose. Reducers and action types are optional, actions live in the store
+beside the state, and — in its own words — "zustand doesn't care if your actions are async or not". `set` is available
+to any function in the store, and `getState()` and `setState()` are available to anyone who imports the hook,
+including code outside React. It is small and pleasant to use, and it has nothing at all to say about where a decision
+lives. A component that reaches in with `setState()` is doing exactly what it was invited to do.
+
+Unopinionated has a cost, and it is always the same one: **if you can, you must.** Whatever a library permits, some
+developer on some deadline will do, and six months later the codebase is the union of everything that was allowed. A
+recommendation does not survive that; a boundary does. This library is the opinion both of them leave to the team,
+made into a boundary:
+
+|                                | Redux                                                       | Zustand                                          | magic-use-case                                                                    |
+| ------------------------------ | ----------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Where the fetch goes           | a thunk, a listener, or RTK Query — chosen per team         | any store action, or any component               | a gateway, called from a use case                                                 |
+| Where the decision goes        | the reducer, by recommendation; the thunk, often            | anywhere                                         | the use case, and nowhere else                                                    |
+| Who may write state            | a reducer, in response to a dispatched action               | anything that can reach `set` or `setState()`    | a running use case; a write anywhere else throws at that line                     |
+| What the screen renders        | selectors, memoized with `reselect`                         | selectors, `useShallow` for several fields       | a presenter, which runs one pure presentation once per state change for every screen and hands the model through a reconciled store, so only what changed reaches the renderer |
+| Changing one nested field      | an action and a reducer case (Immer inside RTK)             | one `set`                                        | one assignment inside `runLogic`                                                  |
+| A flow of several steps        | a thunk, a saga, or listener middleware                     | an async action                                  | a higher-order use case, with one `isLoading` for the whole flow                  |
+| Concurrent runs of the same op | your problem, unless it is an RTK Query query               | your problem                                     | de-duplicated by parameters; joiners share the run                                |
+| Enforced by                    | development-mode checks for mutation and serializability    | nothing                                          | the compiler (`DeepReadonly`, `MagicUseCaseTypes`) and a runtime proxy on writes  |
+| Tested by                      | reducers as pure functions; thunks with a mocked `dispatch` | calling store functions                          | running the use case against a stubbed transport; calling the presentation        |
+| Framework                      | core is framework-free; `react-redux` binds it              | React; a vanilla store exists                    | plain TypeScript core; React and Solid adapters, one import apart                 |
+
+What you give up is the ecosystem: the Redux DevTools timeline, RTK Query's cache, Zustand's `persist` and its
+five-minute learning curve. What you get is a home for every line of code that is not markup, and a compiler and a
+runtime that refuse the alternatives — so the rule about where the fetch goes is not something the next developer has
+to have read.
+
+One more difference, and it is the one that outlasts the others. Redux and Zustand are libraries; this is an
+architecture that happens to ship as one. The five players and the rules between them owe nothing to TypeScript —
+they were worked out in it, but a use case, a presentation, a gateway and a state that only a use case may write can
+be built in any language that has a function and a class, and the same tests carry over. The two adapters here are
+one implementation of that shape, for two frameworks. [What this buys you](#what-this-buys-you) is the same argument
+one level down: the part worth keeping is the part that never named the framework, and it does not name the language
+either.
+
+---
+
+# 1. Components
 
 Draws the screen and forwards the click. There is deliberately very little to say about it, and that is the point:
 
@@ -97,20 +597,29 @@ reaches the state itself.
 It is also the only part of your application that knows which UI framework you use — which is why it is the part you
 rewrite when you move to another one, and the part with no tests worth writing.
 
-## 2. Presentations
+---
+
+# 2. Presentations
 
 Turns state into exactly what a screen shows. A pure function, nothing else: no side effects, no use-case calls, no
 writes. Every format, filter, sort and label happens here, so the component receives values it can render directly.
 
 ```ts
 const presentPayment: Presentation<AppState, PresentablePayment> = (state) => ({
-  total: currency(state.payment.total), // "$1,240.00", not 1240
-  canSubmit: state.payment.methodId !== undefined,
+  balanceDue: currency(state.selectedLease?.currentBalance ?? 0), // "$1,240.00", not 1240
+  canPay: state.paymentForm.values.methodId !== undefined,
 });
 ```
 
-How one behaves — the work shared between screens, how little of the screen a change touches, how models compose, and
-why the one you are handed is readonly:
+Two words, and the document uses both, so here is the difference once. A **presentation** is the function above:
+yours, pure, and testable on its own — call it with a state, assert the model. A **presenter** is the library's object
+that holds a presentation: it subscribes to state changes, reruns the presentation on each one, and hands the model to
+whoever is listening. `usePresenter(presentPayment)` makes a presenter for the presentation you pass, and that is
+the only way you meet one. So you write presentations, the library runs them through presenters, and the
+component reads a model. The tests are on the presentation; a presenter is plumbing, with nothing in it to assert.
+
+What follows is how one behaves: the work shared between screens, how little of the screen a change touches, how
+models compose, and why the one you are handed is readonly.
 
 Ten screens rendering the same presentation do not run it ten times. Presenters given the same presentation share a
 single run of it: the model is built once per state change and handed to all of them, and the last presenter to be
@@ -124,26 +633,29 @@ Which means: export presentations at module scope and pass them by reference.
 
 ```ts
 // shared: every screen passes the same function object
-export const presentTenants: Presentation<AppState, PresentableTenants> = (state) => ({ … });
+export const presentTenants: Presentation<AppState, PresentableTenants> = (state) => ({ /* ... */ });
 usePresenter(presentTenants);
 
-// not shared: a new function on every render, and it captures stale props.
-// do this and I will look for you, I will find you, and I will explain the
-// difference — I have a special set of skills and a slightly Irish accent.
+// not shared: a new function on every render, and it captures stale props
 usePresenter((state) => ({ names: state.tenants.map(() => props.format) }));
 ```
+
+Do the second one and I will look for you, I will find you, and I will explain the difference — I have a special set of
+skills and a slightly Irish accent.
 
 **Never write one inline.** A presentation derives its model from state alone, so an inline one gains nothing and
 loses two things: it runs on its own instead of sharing the single model every other screen is reading, and it closes
 over the props of the render that created it, so it is stale the moment they change. There is no case where the
 inline version is the right answer — give it a name, export it, and pass the name.
 
-> [!NOTE] **`Presenter` is exported too**, and it is what `usePresenter` is built on: it holds a presentation, reruns
-> it on every state change, and hands the model to whoever subscribed. Reach for it only to wire a presentation into
-> something that is not a component — another framework, a canvas, a worker. It is infrastructure, not a base class:
-> do not extend it, and do not construct one inside a presentation.
+> [!NOTE]
+> **`Presenter` is exported** because the adapters are built on it — it is what `usePresenter` constructs, and that
+> is the only reason it is public. Do not construct one, do not extend it, and do not use it to wire a presentation
+> into something that is not a component. A presentation is used in exactly two ways: by a component, through
+> `usePresenter`, or by another presentation, as a plain call. There is no third.
 
-> [!NOTE] `usePresenter` **reads the presentation once**, when the component first runs — the same way a component
+> [!NOTE]
+> `usePresenter` **reads the presentation once**, when the component first runs — the same way a component
 > keeps the store it created. Passing a different function on a later render does not swap it, so
 > `usePresenter(isAdmin ? presentAdmin : presentUser)` keeps whichever was there first. Choose the presentation with
 > the component, not inside it: render a different component, or make the branch part of the model.
@@ -159,9 +671,7 @@ inline version is the right answer — give it a name, export it, and pass the n
 > Nothing is wasted by holding two or three. Each model is built once per state change and shared with every other
 > screen reading the same presentation, so a second presenter adds a subscription, not a second run.
 
-### A model is rebuilt, but the screen is not
-
----
+## A model is rebuilt, but the screen is not
 
 A presentation runs again on every state change and returns a whole new object. That sounds expensive, and it would be
 if the object went straight to the renderer. It does not: `usePresenter` puts it through a **reconciled store**, which
@@ -187,9 +697,7 @@ The practical consequence for you: write presentations plainly. Map, sort, forma
 on the whole model, without memoizing by hand. The identity work that makes rendering cheap has already been done
 underneath you, and hand-rolled caching on top of it is where the stale value comes from.
 
-### View models compose
-
----
+## View models compose
 
 A view model is not one flat object per screen. Build it from smaller ones, the same way the screen is built from
 smaller components:
@@ -243,19 +751,18 @@ format and the same status label, because they all go through `presentLease`. An
 component takes as a prop**, so a `<LeaseCard lease={model.leases[0]} />` needs nothing from state and nothing
 formatted at the call site.
 
-> [!NOTE] Compose by **calling a function**, never by constructing a `Presenter` inside a presentation. `usePresenter`
+> [!NOTE]
+> Compose by **calling a function**, never by constructing a `Presenter` inside a presentation. `usePresenter`
 > is what shares work between screens, keyed on the identity of the function you hand it; a presentation calling
 > another is an ordinary call, computed as part of the outer run.
 
 A child component's prop type is the nested model wrapped in `DeepReadonly`, since that is what it receives:
 
 ```tsx
-function LeaseCard({ lease }: { lease: DeepReadonly<PresentableLease> }) { … }
+function LeaseCard({ lease }: { lease: DeepReadonly<PresentableLease> }) { /* ... */ }
 ```
 
-### The model is readonly
-
----
+## The model is readonly
 
 One model is shared by every screen using that presentation, so a component that wrote to it would be rewriting what
 the others are rendering. `usePresenter` returns `DeepReadonly<TModel>`, enforced by the compiler and by the same
@@ -267,7 +774,9 @@ and `clear` throw. Arrays become `readonly` arrays. Methods pass through untouch
 with behavior and still be callable; the object is recognizable too, `constructor` and `instanceof` answering the way
 they would without the proxy. Only writes are refused.
 
-## 3. Use cases
+---
+
+# 3. Use cases
 
 Decides what happens. It is the only thing allowed to write application state, the only thing that calls gateways, and
 the place every business rule lives — validation, sequencing, what a failure means, where to navigate next.
@@ -283,9 +792,7 @@ class PayUseCase extends BaseUseCase {
 One use case is one thing the app does. A flow that needs several is [a use case that runs
 them](#higher-order-use-cases).
 
-### Where the gateways come from
-
----
+## Where the gateways come from
 
 `paymentGateway` above is simply imported. A use case takes **no dependencies through its constructor** — the only
 argument it accepts is the progress reporter — so gateways are not injected into it. They are module singletons,
@@ -318,9 +825,7 @@ So the injection happens once, at the `export const` line, and the use case just
 What follows is what a single `execute()` does — when it runs, when it does not, and how it reports progress — and then
 how use cases compose when a flow needs several.
 
-### One run, not five
-
----
+## One run, not five
 
 Running the same use case with the same parameters while it is already running does not start a second one. The later
 callers join the run in flight and get its outcome — including its failure:
@@ -343,8 +848,7 @@ A caller that joins a run already in flight is still a caller: if nobody is wait
 it joined completes. That matters when the run it joined was nested inside something else and therefore silent —
 without it, a screen asking for something another flow was already fetching would never be told it arrived.
 
-#### Different parameters are different work — so await them
-
+### Different parameters are different work — so await them
 
 De-duplication is keyed on the parameters, so different ones mean two real runs:
 
@@ -373,7 +877,7 @@ costs you ordering.
 Awaiting is not always available, though — two components each running their own use case cannot await each other.
 When runs really are concurrent, fix it inside the use case rather than in the component:
 
-- **Key the state by what it describes.** `state.leases[leaseId] = …` rather than `state.selectedLease = …`. Two runs
+- **Key the state by what it describes.** `state.leasesById[leaseId] = …` rather than `state.selectedLease = …`. Two runs
   then cannot overwrite each other at all, and the presentation reads the entry for whatever is selected now.
 - **Re-read the subject after each** `await`**.** If what the run was started for has changed, stop:
 
@@ -393,7 +897,7 @@ run that should win would drop its own result.
 Reach for those rather than a request id or a cancellation token: the problem is not knowing _which_ run you are, it
 is writing somewhere two runs share.
 
-#### Two screens, one use case, different filters
+### Two screens, one use case, different filters
 
 The common shape of all this: two screens showing the same data filtered differently, each loading it for itself.
 
@@ -419,15 +923,14 @@ protected async runLogic(filter: RequestFilter) {
 Each presentation then reads its own entry, the two runs never touch the same place, and the order they finish in
 stops mattering.
 
-> [!WARNING] **Do not put a** `Set` **or a** `Map` **in a filter.** The de-duplication key is `JSON.stringify(params)`,
+> [!WARNING]
+> **Do not put a** `Set` **or a** `Map` **in a filter.** The de-duplication key is `JSON.stringify(params)`,
 > and both stringify to `{}` — so `{ statuses: new Set(["open"]) }` and `{ statuses: new Set(["closed"]) }` are the
 > same key, the second screen joins the first run instead of making its own, and it renders data it never asked for.
 > Filters are where this bites, because a set of selected values is such a natural thing to pass. Use an array — and
 > sort it, so the same selection made in a different order is the same key.
 
-### Progress, for work the user watches
-
----
+## Progress, for work the user watches
 
 `useUseCase` returns a `progress` number alongside `isLoading`, and the use case is what moves it. A use case receives
 an optional reporter as its constructor argument and calls it:
@@ -479,7 +982,7 @@ inner steps to drive the bar passes its own reporter down:
 ```ts
 class SubmitRequestUseCase extends BaseUseCase {
   protected async runLogic() {
-    …
+    // ...
     await new CreateRequestUseCase(this.onProgress).execute(values);
   }
 }
@@ -519,9 +1022,7 @@ so it travels by constructor rather than through the scope.
 **Detached runs have no progress**, because nobody is waiting on them — see [Work the caller does not wait
 for](#work-the-caller-does-not-wait-for). Work the user watches is work you await.
 
-### Higher-order use cases
-
----
+## Higher-order use cases
 
 A flow that needs several steps **is itself a use case** — one that sequences lower-order ones and branches on what
 they leave in state. Not a hook, not a page-state object, not a component effect:
@@ -544,21 +1045,21 @@ is a business rule, and a component is the wrong place for it. Two things follow
 - **Staleness is handled inside**, not in the component. Key state by what it describes so two runs cannot overwrite
   each other, and re-read the subject after each `await` so a run whose subject changed can stop.
 
-#### Not a context
+### Not a context
 
 The temptation, when several use cases belong to one screen, is to wrap them in a context and expose them as one
 object:
 
 ```tsx
 // don't
-const CheckoutContext = createContext();
+const PayRentContext = createContext();
 
-function CheckoutProvider({ children }) {
+function PayRentProvider({ children }) {
   const { execute: validate } = useUseCase(ValidateAccountUseCase);
   const { execute: quote } = useUseCase(GetQuoteUseCase);
   const { execute: pay } = useUseCase(PayUseCase);
 
-  const checkout = async (request) => {
+  const payRent = async (request) => {
     // ← the flow, in the UI layer
     await validate(request.accountId);
     await quote(request);
@@ -567,9 +1068,9 @@ function CheckoutProvider({ children }) {
   };
 
   return (
-    <CheckoutContext.Provider value={{ checkout }}>
+    <PayRentContext.Provider value={{ payRent }}>
       {children}
-    </CheckoutContext.Provider>
+    </PayRentContext.Provider>
   );
 }
 ```
@@ -582,12 +1083,12 @@ longer aborts the rest — each `execute` came from a hook, and hooks swallow.
 Write the flow as a use case and let the screen call one thing:
 
 ```ts
-class CheckoutUseCase extends BaseUseCase {
-  protected async runLogic(request: CheckoutRequest) {
+class PayRentUseCase extends BaseUseCase {
+  protected async runLogic(request: PaymentRequest) {
     await new ValidateAccountUseCase().execute(request.accountId);
     await new GetQuoteUseCase().execute(request);
 
-    if (this.getState().checkout.needsConfirmation) return; // a business rule, stated once
+    if (this.getState().paymentForm.needsConfirmation) return; // a business rule, stated once
     await new PayUseCase().execute(request);
   }
 }
@@ -595,10 +1096,10 @@ class CheckoutUseCase extends BaseUseCase {
 
 ```tsx
 const {
-  execute: checkout,
+  execute: payRent,
   isLoading,
   didSucceed,
-} = useUseCase(CheckoutUseCase);
+} = useUseCase(PayRentUseCase);
 ```
 
 Contexts are still the right tool for what they are for — a theme, a locale, a router. They are not a place to keep
@@ -632,7 +1133,7 @@ for it to stay quiet on behalf of. It announces its own work when it lands, sepa
 class SubmitRequestUseCase extends BaseUseCase {
   protected async runLogic() {
     this.detach(CreateRequestUseCase, values); // announces when it finishes, later
-    this.getState().form = emptyForm();
+    this.getState().requestForm = emptyRequestForm();
   }
 } // ← announces the cleared form, now
 ```
@@ -648,9 +1149,7 @@ screen hears about the leases when the leases arrive, not when everything else h
 immediately — usually the point: route first, and let the data that is still loading fill in. A failure travels the
 same way, up to whichever run has no caller, and is reported there.
 
-### Work the caller does not wait for
-
----
+## Work the caller does not wait for
 
 Sometimes a use case should start something and return — the screen goes back to the list, and the new row appears
 when the work lands. That is `detach`:
@@ -665,7 +1164,7 @@ which is the point.
 ```ts
 class SubmitRequestUseCase extends BaseUseCase {
   protected async runLogic() {
-    const form = this.getState().form;
+    const form = this.getState().requestForm;
     form.errors = validateRequest(form.values); // awaited: the screen needs the answer
     if (form.errors.size > 0) return;
 
@@ -684,8 +1183,7 @@ close(); // the modal shuts; the row appears when the work lands
 **Validate first, then detach.** Anything the screen needs an answer about has to happen before the detached call —
 the caller returns immediately, and after that nobody is listening for a verdict.
 
-#### What a detached run is
-
+### What a detached run is
 
 Not nested. It never holds its starter open, so the starter announces its own changes right away and the detached run
 announces its own when it finishes. Nobody is waiting on it either, which is why **its failure is reported rather than
@@ -695,15 +1193,13 @@ about.
 De-duplication still applies: detaching a use case that is already running with the same parameters joins the run in
 flight rather than starting a second.
 
-#### When to reach for it
-
+### When to reach for it
 
 - A background refresh where the screen already has something to show.
 - Work that outlives the screen that started it — the modal closes, the upload continues.
 - Fire-and-forget reporting: analytics, a read receipt, a "last seen" ping.
 
-#### When not to
-
+### When not to
 
 - **Anything the user watches.** A detached run has no caller, so `isLoading`, `didSucceed` and `progress` describe
   only the starter. A tenant uploading four photos should see the bar move, so that one is awaited.
@@ -712,13 +1208,14 @@ flight rather than starting a second.
 - **Anything whose failure should stop the flow.** A detached failure is reported, not thrown, so it cannot abort
   anything.
 
-#### Testing it
-
+### Testing it
 
 The work finishes after `execute()` resolves, so a test waits for the result rather than for a clock — see [Work that
 outlives the call](#work-that-outlives-the-call).
 
-## 4. Application state
+---
+
+# 4. Application state
 
 The one truth. A plain, mutable object holding everything the app knows — not what it is doing, not how the last
 request went. Only a use case may write to it; everything else reads.
@@ -733,7 +1230,7 @@ export interface AppState {
 export const createAppState = (): AppState => ({ tenants: [] });
 ```
 
-How writing to it works — when you may, what happens when you do, and how it comes into being:
+What follows is how writing to it works: when you may, what happens when you do, and how it comes into being.
 
 Being **mutable** — not a reducer, not a frozen tree, not an action log — tends to raise an eyebrow, so it is worth
 saying why it is safe here.
@@ -758,10 +1255,10 @@ a screen mid-render either.
 another run write in the gap, so the object ends up holding a field from each:
 
 ```ts
-protected async runLogic(edit: Edit) {
-  this.getState().form.name = edit.name;
-  const email = await addressBook.resolve(edit.name); // another run writes the form here
-  this.getState().form.email = email;                 // ...and this lands on top of it
+protected async runLogic(edit: TenantEdit) {
+  this.getState().tenantForm.name = edit.name;
+  const email = await tenantGateway.emailFor(edit.name); // another run writes the form here
+  this.getState().tenantForm.email = email;              // ...and this lands on top of it
 }
 ```
 
@@ -774,15 +1271,16 @@ You get the same guarantee here by writing the way a reducer does: **do the wait
 uninterrupted block.** Nothing can interleave inside it, because nothing yields inside it.
 
 ```ts
-protected async runLogic(edit: Edit) {
-  const email = await addressBook.resolve(edit.name); // all the waiting, up front
-  const form = this.getState().form;                  // ...then nothing yields
+protected async runLogic(edit: TenantEdit) {
+  const email = await tenantGateway.emailFor(edit.name); // all the waiting, up front
+  const form = this.getState().tenantForm;               // ...then nothing yields
   form.name = edit.name;
   form.email = email;
 }
 ```
 
-> [!WARNING] **Do not carry a reference to part of state across an** `await`**.** If another run replaces that branch
+> [!WARNING]
+> **Do not carry a reference to part of state across an** `await`**.** If another run replaces that branch
 > while you are gone, your reference is left pointing at the object it replaced, and your writes go somewhere nothing
 > reads — no error, no event, no clue. Reach for `getState()` again after every `await` rather than holding what it
 > returned.
@@ -817,9 +1315,7 @@ A presentation is only ever called with state. `resetAppState()` empties every m
 has to guard against the absence of the state its signature promises. One that throws anyway is reported to the
 console and leaves its model empty, rather than failing the render or the emit that other screens are waiting on.
 
-### Mutate in place, or replace immutably — your choice
-
----
+## Mutate in place, or replace immutably — your choice
 
 The library takes no position on how state is shaped. Mutating in place is fully supported, and so is a Redux-style
 approach where branches are replaced with new values. Both are allowed in the same state tree, even in the same use
@@ -850,9 +1346,7 @@ replacement yields a new reference, so reference comparison is enough.
 The root object itself stays stable either way: it is adopted once from `initializeState()`, and there is no API to
 swap it wholesale.
 
-### Bootstrapping
-
----
+## Bootstrapping
 
 `initializeState()` is declared on `UseCase` but called exactly once per app run — by whichever use case executes
 first. Put it on a single base class that every use case extends, and you write it once.
@@ -861,9 +1355,7 @@ Core decides when to bootstrap, by checking whether state exists. A use case can
 replace live state; concurrent first executions bootstrap once between them. `resetAppState()` is the only way back to
 an uninitialized state.
 
-### Resetting state
-
----
+## Resetting state
 
 `resetAppState()` is `protected` on `UseCase`, so only a use case can trigger a reset — a component or presentation
 has no access to it. Put it in a use case that represents the event:
@@ -884,9 +1376,7 @@ the next `execute()` bootstraps through `initializeState()` again.
 `protected` is a compile-time boundary, so JavaScript can still reach the method. Calling it outside a running use
 case throws, which is the same mutation window that governs every other write.
 
-### State is adopted, not borrowed
-
----
+## State is adopted, not borrowed
 
 The object returned from `initializeState()` is deep-cloned. The caller keeps their reference, but it is no longer
 application state — writing to it has no effect and emits nothing:
@@ -900,20 +1390,24 @@ original.tenants.push(tenant); // legal, but changes nothing
 `getState()` is the only way to reach live state. The clone preserves prototypes, so a class works if you want one:
 `instanceof` holds and methods still work.
 
-> [!WARNING] **A class rules out handing state to the browser.** Prototypes cannot be serialized, so a server render
+> [!WARNING]
+> **A class rules out handing state to the browser.** Prototypes cannot be serialized, so a server render
 > that reaches [handing state to the browser](#handing-the-state-to-the-browser) throws rather than shipping the fields
 > without the behavior. The page still renders on the server — it is the handover that fails — but the browser then
 > starts from nothing and fetches it all again. Plain objects keep that door open, which is why they are what the
 > examples use.
 
-> [!NOTE] `#private` **fields cannot be cloned.** There is no reflection for them, so a method reading `this.#field`
+> [!NOTE]
+> `#private` **fields cannot be cloned.** There is no reflection for them, so a method reading `this.#field`
 > on the clone throws `Cannot read private member`. Use TypeScript's `private` or a `_` prefix — both are ordinary
 > properties and clone correctly.
 
 One limit remains: **the mutation window is time-based, not call-based.** While a use case awaits, any code that
 happens to run is inside the window and may write. The guard catches mistakes; it is not a security boundary.
 
-## 5. Gateways
+---
+
+# 5. Gateways
 
 Crosses the process boundary — HTTP, storage, a database, a third-party SDK — and comes back with **your** types. It
 never writes state and never touches the UI: it returns a value to the use case that asked, and the use case decides
@@ -931,13 +1425,13 @@ class TenantGateway extends Gateway {           // your base class, not the libr
 }
 ```
 
-This one is yours to write: the library has no `Gateway` type, so what follows is convention rather than API. It is
-the half of the architecture most often skipped, which is why this is mostly design advice — and every gateway in it
-is built on a single shared network manager, which is where it starts.
+This one is yours to write: the library has no `Gateway` type, so what follows is convention rather than API. That is
+a decision, not an omission — a gateway can be anything: HTTP, storage, an SDK, a socket, a native bridge — and the
+only thing they share is the rule, which a base class cannot express. It is the half of the architecture most often
+skipped, which is why this is mostly design advice — and every HTTP gateway in it is built on a single shared network
+manager, which is where it starts.
 
-### Every gateway is built on one network manager
-
----
+## Every gateway is built on one network manager
 
 Not "each gateway does its own `fetch`". There are three layers, and each knows one thing.
 
@@ -965,8 +1459,7 @@ Not "each gateway does its own `fetch`". There are three layers, and each knows 
 > A `Response` is the one place the platform type is reasonable, because it never
 > leaves the gateway — the gateway maps it and returns your own types.
 
-#### 1. The network manager — the only place a request leaves the process
-
+### 1. The network manager — the only place a request leaves the process
 
 ```ts
 export interface NetworkManager {
@@ -978,7 +1471,7 @@ export class BaseNetworkManager implements NetworkManager {
 
   sendRequest = async (request: NetworkRequest): Promise<Response> => {
     const url = request.url.startsWith('http') ? request.url : `${BASE}${request.url}`;
-    return fetch(this.resolve(url), { method: request.method, headers: request.headers, … });
+    return fetch(this.resolve(url), { method: request.method, headers: request.headers, /* ... */ });
   };
 
   /** A relative url means nothing on a server: there it dials the service directly. */
@@ -991,8 +1484,7 @@ export const networkManager = new BaseNetworkManager();
 
 It knows about urls and `fetch`. It does not know about auth, status codes, retries, or your types.
 
-#### 2. The base gateway — everything true of every request
-
+### 2. The base gateway — everything true of every request
 
 ```ts
 export class Gateway {
@@ -1054,17 +1546,14 @@ export interface AuthTokenStore {
 Its `Promise` returns are what let it be something other than `localStorage` — a cookie read on the server, a keychain
 on a native shell — without a single gateway changing.
 
-#### 3. The concrete gateways — one per subject, each given the same instance
-
+### 3. The concrete gateways — one per subject, each given the same instance
 
 ```ts
-export const chatGateway = new ChatGateway(networkManager, tokenStore);
+export const messageGateway = new MessageGateway(networkManager, tokenStore);
 export const tenantGateway = new TenantGateway(networkManager, tokenStore);
 ```
 
-### Why it is built this way
-
----
+## Why it is built this way
 
 **It isolates you from the communication framework entirely.** Nothing above the gateway knows how the data arrives.
 Not that it is HTTP, not that it is REST, not that `fetch` exists. Move to GraphQL, gRPC, a WebSocket, `axios`, or a
@@ -1099,9 +1588,7 @@ rather than on `fetch`. That is what lets a server build swap the transport, and
 environment it happens to run in — note that even the "am I on a server" question is passed in as `RenderContext`
 rather than reached for, so nothing in this layer imports your UI framework.
 
-### Map the response. Always.
-
----
+## Map the response. Always.
 
 ```ts
 class TenantGateway extends Gateway {
@@ -1134,9 +1621,7 @@ run. It costs you that one thing — a class instance cannot be serialized, so t
 starts from nothing. Worth it for a domain type that genuinely earns its methods; not worth it for a bag of fields
 with a constructor around it.
 
-### Generated clients stop at the gateway
-
----
+## Generated clients stop at the gateway
 
 Swagger, OpenAPI, gRPC, a vendor SDK's types — use them if they save you work, **inside the gateway only**. The moment
 a generated type appears in a use case, a presentation, application state or a component, the backend's schema has
@@ -1195,9 +1680,7 @@ The rule is worth enforcing rather than remembering:
 The same goes for a third-party SDK's objects. A Stripe or Plaid handle belongs behind a gateway; what comes out is
 yours.
 
-### Third-party SDKs
-
----
+## Third-party SDKs
 
 An SDK is a gateway, and the same rule applies: **nothing it gives you may escape.** But SDKs break the shape in ways
 a REST call does not, so they are worth their own chapter.
@@ -1205,8 +1688,7 @@ a REST call does not, so they are worth their own chapter.
 A payment SDK, a realtime client, a maps library, an analytics tag — each tends to be stateful, imperative,
 callback-driven, and to want the DOM. None of those belong in a use case.
 
-#### Wrap it, and return your own types
-
+### Wrap it, and return your own types
 
 ```ts
 class PaymentGateway {
@@ -1226,8 +1708,7 @@ A `Stripe.PaymentMethod`, a Plaid handle, a SignalR connection: these stop here.
 `PaymentMethod` you defined, and what it catches is an error you named. Nothing above the gateway should be able to
 tell which vendor you chose — that is the point, and it is what makes replacing one a change in a single file.
 
-#### The DOM is still not the gateway's
-
+### The DOM is still not the gateway's
 
 Many SDKs load by injecting a `<script>`. That is the browser's runtime, not the process boundary, and a gateway that
 reaches for `document` has stopped being portable. Put the loading behind a small interface and hand it in:
@@ -1246,7 +1727,7 @@ class PlaidGateway {
     } catch {
       throw new PlaidUnavailable();
     }
-    …
+    // ...
   }
 }
 ```
@@ -1254,8 +1735,7 @@ class PlaidGateway {
 Now the gateway is testable without a DOM, and the one file that knows about `document.createElement` is the one whose
 job that is.
 
-#### An SDK that calls you back calls a use case
-
+### An SDK that calls you back calls a use case
 
 Realtime clients push. The callback is an event arriving from outside, and it is handled the way every other event is
 — by running a use case:
@@ -1267,13 +1747,14 @@ await signalRGateway.onMessage(() => void new LoadMessagesUseCase().execute());
 The callback must not write state. It has no mutation window, so the write would throw — which is the guard doing its
 job, telling you the handler belongs in a use case.
 
-#### Replace the SDK at its own module, in tests
-
+### Replace the SDK at its own module, in tests
 
 Never stub your own wrapper. Mock the vendor's module once for the whole suite, in `setupFiles`, so your gateway's
 real code — the mapping, the error translation, the retry — still runs. See [Testing](#testing).
 
-## Errors
+---
+
+# Errors
 
 `ErrorHandler` **is the single place every failure in the app arrives.** Not one of several — the only one. Whatever
 throws, wherever it throws, and however deep it was nested, it surfaces there: a gateway rejecting a bad response, a
@@ -1289,9 +1770,7 @@ case catches only when it has something to decide.
 
 This chapter is the rest of that road: where a failure goes, who decides what it means, and how the screen shows it.
 
-### When a use case fails
-
----
+## When a use case fails
 
 `execute()` rejects. A nested failure therefore aborts its caller, which is what makes a [higher-order use
 case](#higher-order-use-cases) a sequence rather than a list of attempts.
@@ -1305,9 +1784,7 @@ handled failure the user still has to see belongs in state, where a presentation
 failed. And a use case that writes state and then throws still announces what it wrote, so anything it managed before
 failing — a partial result, a cleared selection — reaches the screen rather than being lost with the run.
 
-### The use case decides what a gateway failure means
-
----
+## The use case decides what a gateway failure means
 
 A gateway throwing is not a verdict, it is information. The use case is what knows whether that failure matters, and
 it has four answers:
@@ -1320,9 +1797,9 @@ class LoadDashboardUseCase extends BaseUseCase {
 
     // 2. swallow it — the page is still worth showing without this
     try {
-      this.getState().tips = await tipsGateway.list();
+      this.getState().announcements = await announcementGateway.list();
     } catch {
-      this.getState().tips = [];
+      this.getState().announcements = [];
     }
 
     // 3. record it — the user is the one who has to act on it
@@ -1362,9 +1839,7 @@ Three consequences worth holding on to:
   name the user's dialog is built from. Preserve the cause if it matters: `new NoLedgerForThisLease({ cause: error
   })`.
 
-### Define your own errors
-
----
+## Define your own errors
 
 A use case should branch on what went wrong, not on a number:
 
@@ -1392,9 +1867,7 @@ Two things follow. A use case never inspects a status code, because it never see
 into a name. And an error carries a _code_ rather than a message: the wording is the presentation's job, so the same
 failure can be phrased one way in a dialog and another in a form field.
 
-### Errors the screen shows inline
-
----
+## Errors the screen shows inline
 
 Not every failure is a dialog. A rejected password, a required field, a payment the processor declined — the user has
 to see those _where they are_, next to the field or in the panel that failed, and carry on. Throwing sends them to the
@@ -1416,6 +1889,7 @@ other fact:
 export class PaymentForm {
   values: PaymentValues = { amount: "", methodId: undefined };
   errors = new Set<PaymentError>();
+  needsConfirmation = false;
 }
 
 export enum PaymentError {
@@ -1503,9 +1977,7 @@ hand-sync, validation copied into the component, and a view model derived somewh
 Field values are application state — write them through a use case, read them through a presentation, like everything
 else.
 
-### Listening from outside a component
-
----
+## Listening from outside a component
 
 `ErrorHandler` and `Navigator` cover the two things an application does with these events, and both are built on the
 same pair of subscriptions the library exports:
@@ -1521,339 +1993,9 @@ use case puts a url on one channel with `navigate()`, and an error on the other 
 dialog — rare, and worth a moment's thought each time, since a failure the user has to act on belongs in state.) Tests
 use the same pair, so what they observe is what a screen would have been told.
 
-## Quick start
-
-All five players, in one feature, in five steps. Nothing here is pseudo-code — it is a complete, working feature, and
-every piece of it belongs to one of the chapters above.
-
-### 1. Describe the state
-
 ---
 
-Application state is an ordinary object: a type describing the shape, and a function that builds an empty one.
-
-```ts
-// state.ts
-export interface AppState {
-  tenants: Tenant[];
-}
-
-export const createAppState = (): AppState => ({ tenants: [] });
-
-export const appState = createAppState();
-```
-
-A factory rather than a literal, because a server renders many requests and a test runs many cases — each one needs
-its own state, and only a function can hand out a fresh one.
-
-### 2. Give every use case that state, once
-
----
-
-One base class per app supplies the initial state. Every use case extends it, so the state type is named once rather
-than on every use case you write.
-
-```ts
-// baseUseCase.ts
-import { UseCase } from "@magicdoor/magic-use-case-react";
-import { AppState, appState } from "./state";
-
-export abstract class BaseUseCase extends UseCase<AppState> {
-  protected async initializeState() {
-    return appState;
-  }
-}
-```
-
-Then tell the library which type that is, so a presentation cannot quietly declare a different one:
-
-```ts
-declare module "@magicdoor/magic-use-case-react" {
-  interface MagicUseCaseTypes {
-    state: AppState;
-  }
-}
-```
-
-`usePresenter` now accepts only presentations written against `AppState`. Without it, a presentation's state type is
-whatever the presentation claims, so one written against the wrong shape compiles cleanly and throws at runtime — on
-the screen, not in the tests.
-
-### 3. Write what the app does
-
----
-
-A use case owns one piece of behavior. `runLogic` is the whole of it, and `getState()` is the only way to reach live
-state.
-
-```ts
-// loadTenantsUseCase.ts
-export class LoadTenantsUseCase extends BaseUseCase {
-  protected async runLogic() {
-    this.getState().tenants = await tenantGateway.list();
-  }
-}
-```
-
-No try/catch **here**, because this use case has nothing to add: if the gateway throws, the failure propagates,
-`didSucceed` goes false, and `ErrorHandler` shows it — all of which you get already. A `try` that catches and
-rethrows the same error is pure ceremony.
-
-Catch when the use case has something to _decide_ — and it often does. Reclassifying is the usual reason: a `NotFound`
-from the ledger means nothing to a screen, and `NoLedgerForThisLease` means everything, so catch it and throw the name
-that carries the meaning. Recording a failure the user has to act on, or carrying on without what failed, are the
-other two. [The use case decides what a gateway failure
-means](#the-use-case-decides-what-a-gateway-failure-means) sets out all four answers with examples.
-
-`tenantGateway` is your code — the library does not provide one. It is simply the module that owns the `fetch`, and it
-returns your own types rather than the API's:
-
-```ts
-// tenantGateway.ts
-export const tenantGateway = {
-  async list(): Promise<Tenant[]> {
-    const response = await fetch("/api/tenants");
-    if (!response.ok) throw new TenantsUnavailable();
-    const body = (await response.json()) as { id: string; full_name: string }[];
-    return body.map((row) => ({ id: row.id, name: row.full_name }));
-  },
-};
-```
-
-### 4. Say what the screen shows
-
----
-
-A presentation is a **pure function from state to a view model**. All formatting, filtering, sorting and labeling
-happens here — never in the component.
-
-```ts
-// presentTenants.ts
-import type { Presentation } from "@magicdoor/magic-use-case-react";
-
-export interface PresentableTenants {
-  names: string[];
-  countLabel: string;
-  isEmpty: boolean;
-}
-
-export const presentTenants: Presentation<AppState, PresentableTenants> = (
-  state,
-) => ({
-  names: state.tenants.map((tenant) => tenant.name).sort(),
-  countLabel: `${state.tenants.length} tenants`,
-  isEmpty: state.tenants.length === 0,
-});
-```
-
-Export it at module scope. Sharing is by function identity, so every screen that passes this same function shares one
-run of it — see [Presentations](#2-presentations).
-
-### 5. Render it
-
----
-
-The component does two things: run use cases, and render a model.
-
-```tsx
-function TenantList() {
-  const { execute: load, isLoading } = useUseCase(LoadTenantsUseCase);
-  const { model } = usePresenter(presentTenants);
-
-  useEffect(() => void load(), []);
-
-  if (isLoading) return <Spinner />;
-  if (!model) return null;
-
-  return (
-    <>
-      <h2>{model.countLabel}</h2>
-      <ul>
-        {model.names.map((name) => (
-          <li key={name}>{name}</li>
-        ))}
-      </ul>
-    </>
-  );
-}
-```
-
-Notice what the component does _not_ contain: no `fetch`, no `.sort()`, no `.map()` to a label, no `tenants.length ===
-0` check, and no try/catch. Each of those has a home, and it is not here. The next chapter is what that discipline
-buys you; the rest of the document is each player in detail.
-
-**You rarely need to track in state whether a use case worked.** `useUseCase` already reports `isLoading`,
-`didSucceed` and `progress` for the run it started, and the failure itself already reaches `ErrorHandler` — so reach
-for those first and let application state hold what the app _knows_, which here is the tenants.
-
-Sometimes you do need it, and that is fine: a fact that must outlive the run, because something loaded on one screen
-is reported on another, or because the panel has to keep saying "couldn't load" long after the hook that ran it has
-gone. Then it is a fact about the app like any other and belongs in state. Just reach for it when the run's own status
-genuinely cannot answer, rather than by default.
-
-### Wire the two events once, at the root
-
----
-
-A use case can navigate and can report a failure. Two components deliver those to your app, and you mount them once —
-this is the whole of `app.tsx`:
-
-```tsx
-// app.tsx
-import { ErrorHandler, Navigator } from "@magicdoor/magic-use-case-react";
-
-/** Inside the router, because that is where `useNavigate` is available. */
-function NavigationHandler() {
-  const navigate = useNavigate();
-
-  return (
-    <Navigator
-      onNavigate={(url) =>
-        // a use case may send the tenant off-site — to an identity provider, say
-        url.startsWith("http") ? (window.location.href = url) : navigate(url)
-      }
-    />
-  );
-}
-
-function ErrorDialog({
-  error,
-  onClose,
-}: {
-  error: Error;
-  onClose: () => void;
-}) {
-  return (
-    <dialog open>
-      <p>{messageFor(error)}</p>
-      <button onClick={onClose}>Close</button>
-    </dialog>
-  );
-}
-
-/** Every failure in the app arrives here. One rule per kind, in one place. */
-function willReport(error: Error): boolean {
-  if (error instanceof UnauthorizedError) {
-    signOut(window.location.pathname); // handled: sign out and come back here
-    return false; // ...so no dialog
-  }
-  if (!(error instanceof ValidationFailed)) {
-    Sentry.captureException(error); // worth knowing about; still shown
-  }
-  return true;
-}
-
-export function App() {
-  const { execute: initialize } = useUseCase(InitializeAppUseCase);
-
-  useEffect(() => void initialize(), []);
-
-  return (
-    <ErrorHandler
-      onWillReportError={willReport}
-      renderErrorDialog={ErrorDialog}
-    >
-      <Router>
-        <NavigationHandler />
-        <Routes />
-      </Router>
-    </ErrorHandler>
-  );
-}
-```
-
-`messageFor(error)` is yours: a lookup from error type to copy, which is where the wording lives. The error itself
-carries a _code_, never a sentence — see [Define your own errors](#define-your-own-errors).
-
-`ErrorHandler` **is the single place every failure in the app arrives** — see [Errors](#errors) for what that buys you
-and how to use it.
-
-In Solid the same file differs only in the JSX and in `useNavigate` coming from `@solidjs/router`; `ErrorHandler` and
-`Navigator` take the same props.
-
-## What this buys you
-
-Look back at what you just wrote. Four of the five players — the gateway, the use case, application state and the
-presentation — contain **no React, no Solid, no JSX, no hooks**: no reference to a rendering technology at all. They
-are plain TypeScript classes and functions. Only the component knows what framework you are using.
-
-Which means the boundary is not a diagram, it is a directory you can move:
-
-```
-src/
-  gateways/     ─┐
-  use-cases/     │  plain TypeScript. Copy this into any TypeScript app,
-  state/         │  on any front end, and it works.
-  presenters/   ─┘
-  components/      the only part that is React or Solid
-```
-
-Porting a screen to another framework means rewriting the component and changing one import —
-`@magicdoor/magic-use-case-react` for `@magicdoor/magic-use-case-solid`. The behavior, the network layer, the state
-shape and every formatting rule come across untouched, **and so do their tests**, because none of them ever rendered
-anything.
-
-**Navigation travels too.** A use case says _where to go_, never how to get there:
-
-```ts
-this.navigate("/tenants/42"); // no router imported, no router installed
-```
-
-The one place that knows about React Router, or Solid Router, or `window.location`, is the `<Navigator
-onNavigate={…}>` you mount once. Swap the router and you change that one line.
-
-That is also the honest test of whether you are following the architecture. If moving your `use-cases/` folder to a
-Solid app would break it, something has leaked into it that does not belong.
-
-The same independence holds at the other end. Because every gateway is built on [one network manager](#5-gateways),
-nothing above it knows whether the data arrives over REST, GraphQL, a socket or a native bridge. Your application is
-insulated from the UI framework above and the communication framework below, and what is left between them is the part
-worth keeping.
-
-## What is enforced, and what is yours
-
-Some of the rules in the chapters above the library enforces for you; the rest are yours to hold. It is worth knowing
-which is which.
-
-**What the library enforces for you:**
-
-- **Only a use case may write state.** `getState()` returns a proxy that refuses writes outside a running use case —
-  at runtime, at the offending line.
-- **A presentation can never write.** It receives a fully readonly view, whatever else is running.
-- **A component can never write the model.** `usePresenter` returns `DeepReadonly<TModel>`, so it is a compile error
-  before it is a runtime one.
-- **A use case cannot replace live state.** Bootstrapping happens once; `resetAppState()` is the only way back.
-- **Server rendering cannot leak one user's state into another's.** Both server builds resolve a scope per request,
-  so two requests never share state, the event bus, or a model — and rendering outside a request throws rather than
-  falling back to a shared one.
-- **A presentation cannot read a shape the app never emits.** Once the app names its state type through
-  `MagicUseCaseTypes`, `usePresenter` rejects any presentation written against a different one, at compile time.
-
-**What is convention, and yours to hold:**
-
-- **Gateways.** The library has no `Gateway` type. Anything crossing the process boundary belongs behind one — see
-  [Gateways](#5-gateways) and [Third-party SDKs](#third-party-sdks).
-- **Components call use cases, not each other's helpers.** If a screen needs a value, the value belongs in the model.
-- **Validation lives in the use case that owns the rule**, stated once. A form surfaces validation; it does not
-  re-implement it.
-- **Form state is application state**, and so are the errors on it — see [Errors the screen shows
-  inline](#errors-the-screen-shows-inline).
-- **Enumerable business values are enums or** `as const`, never repeated string literals, and never compared against
-  display text.
-- **Either layer may navigate, and the question is whose decision it is.** The use case navigates when _going there is
-  the outcome_ — sign-in succeeded, the session expired, the deep link is honored. The UI navigates when the route is
-  a consequence of what is on screen: a row click, a tab, a back button. Derive the path in the presentation, call the
-  router in the component. The test is whether the rule survives a redesign — "after paying, go to the receipt" does,
-  "clicking this row opens that page" does not.
-- **Timers belong to the UI**, which calls a use case when one fires — a debounce, an animation, a screen that
-  refreshes on an interval. The exception is a timer pacing a request or a connection, which belongs in the gateway.
-  Neither belongs in a use case.
-- **Sequencing use cases is itself a use case** — not a hook, not a context, not a component effect. See [Higher-order
-  use cases](#higher-order-use-cases).
-- **Don't abstract early.** "Several pages use it" is not a reason; leave the duplication until the business boundary
-  is stable.
-
-## Testing
+# Testing
 
 The architecture decides the test strategy, and it comes out as **two kinds of test**. This is the conclusion of years
 of trying the alternatives — a test file per class, mocked gateways, component tests, snapshot suites — rather than a
@@ -1908,9 +2050,7 @@ export default defineConfig({
 mocked or a value cached in one file is still there in the next. Seed state with `givenAppState()` in a `beforeEach`
 and answer the server inside each test — never at module load.
 
-### Give each test its own state
-
----
+## Give each test its own state
 
 `createScope()` and `setScopeResolver()` are the seam. A scope is everything that makes up one running application —
 its state, the event bus, the bookkeeping — so handing a test its own means the real use case runs against a state
@@ -1935,23 +2075,21 @@ export const givenAppState = (): AppState => {
 
 Nothing is mocked here. The use case, the presentation and the gateway all run their real code.
 
-### Stub the server, not your own gateway
-
----
+## Stub the server, not your own gateway
 
 Build every gateway on **one** transport object, and stub that. It is the single seam the whole suite uses:
 
 ```ts
 // the app's one transport, which every gateway is constructed with
-export const networkManager = {
-  async send(request: Request): Promise<Response> { … },
+export const networkManager: NetworkManager = {
+  async sendRequest(request: NetworkRequest): Promise<Response> { /* ... */ },
 };
 ```
 
 ```ts
 it("stores the quote when the server returns a fee breakdown", async () => {
   const appState = givenAppState();
-  vi.spyOn(networkManager, "send").mockResolvedValue(
+  vi.spyOn(networkManager, "sendRequest").mockResolvedValue(
     new Response(JSON.stringify({ amount: 1500, fee: 12.5 }), { status: 200 }),
   );
 
@@ -1971,9 +2109,7 @@ wrapping it still runs. Never stub your own wrapper. Mock a shared module once f
 test file — a second, partial mock of the same module is how an assertion comes to depend on which other file ran
 first.
 
-### Execute the use case directly
-
----
+## Execute the use case directly
 
 ```ts
 await expect(new PayUseCase().execute({ amount: -1 })).rejects.toBeInstanceOf(
@@ -1984,9 +2120,7 @@ await expect(new PayUseCase().execute({ amount: -1 })).rejects.toBeInstanceOf(
 Run `execute()` rather than going through `useUseCase`. The hook catches what a use case throws so a component never
 sees a rejection, which also means a test running through it cannot assert on one.
 
-### Watch what the screen would have been told
-
----
+## Watch what the screen would have been told
 
 `onError` and `onNavigation` are the same subscriptions `ErrorHandler` and `Navigator` use, so a test observes exactly
 what a screen would:
@@ -2011,9 +2145,7 @@ it("sends a signed-out tenant to the sign-in screen", async () => {
 
 Call it **after** `givenAppState()`: the subscriptions belong to the scope that call installs.
 
-### Presentations are pure functions
-
----
+## Presentations are pure functions
 
 Call the presentation with a state and assert the whole model. There is no need to construct a `Presenter` — that only
 adds a subscription and a teardown no test asserts on.
@@ -2034,23 +2166,19 @@ it("formats the balance and labels an ended lease closed", () => {
 Assert the whole model rather than a field at a time, and cover the cases that actually differ: empty state, missing
 optional data, each branch of a label.
 
-### Work that outlives the call
-
----
+## Work that outlives the call
 
 A `detach`ed run finishes after its starter returns, so wait for the result rather than for a timer:
 
 ```ts
 await new SubmitRequestUseCase().execute(); // returns immediately
 
-await vi.waitFor(() => expect(appState.requests).toHaveLength(1));
+await vi.waitFor(() => expect(appState.requestsByStatus.open).toHaveLength(1));
 ```
 
 A fixed `setTimeout` is a guess about scheduling, and guesses fail on a loaded CI machine.
 
-### Timers
-
----
+## Timers
 
 **Where they belong first — and usually that is the UI.** A debounce, an animation, a toast that dismisses itself, a
 screen that refreshes every thirty seconds: these are presentation concerns. The component owns the timer and calls a
@@ -2076,7 +2204,7 @@ that way is what lets most of the suite run without a clock at all.
 
 ```ts
 // waiting for something to finish: poll the condition
-await vi.waitFor(() => expect(appState.requests).toHaveLength(1));
+await vi.waitFor(() => expect(appState.requestsByStatus.open).toHaveLength(1));
 
 // the code itself waits: control the clock, do not live through it
 vi.useFakeTimers();
@@ -2092,12 +2220,11 @@ where you will find out.
 **Hand them back.** `vi.useRealTimers()` in `afterEach`. Under `isolate: false` test files share a worker, so fake
 timers left installed become the next file's problem, and the failure surfaces somewhere with no timers in sight.
 
-> [!NOTE] `vi.restoreAllMocks()` does not undo `vi.stubGlobal` or `vi.stubEnv`. A stubbed global outlives the test
+> [!NOTE]
+> `vi.restoreAllMocks()` does not undo `vi.stubGlobal` or `vi.stubEnv`. A stubbed global outlives the test
 > that set it, so unstub them in a setup file's `beforeEach` rather than assuming `restoreAllMocks` covers it.
 
-### Test behavior, not structure
-
----
+## Test behavior, not structure
 
 **A test names something the app does, never how the code is arranged.** The check is a rewrite: change the
 implementation, keep the behavior, and the test should still pass. If it breaks, it was pinned to structure.
@@ -2109,9 +2236,7 @@ arguments`.
 Do not write component tests. Formatting lives in a presentation and decisions live in a use case; what is left is
 markup, which breaks on every design change and catches no defect.
 
-### Coverage is a floor, not a target
-
----
+## Coverage is a floor, not a target
 
 Aim for 100% of use cases and presentations — statements, branches and functions — and reach it by fixing causes
 rather than adding tests to the number. A line you cannot reach through a use case or a presentation is telling you
@@ -2122,7 +2247,9 @@ one of three things:
 - **It is in the wrong layer.** Code only a component can reach is code a component should not be calling; move it,
   and it becomes reachable.
 
-## Server-side rendering
+---
+
+# Server-side rendering
 
 `@magicdoor/magic-use-case-solid` ships two bundles: `dist/index.js` compiled with Solid's DOM generator, and
 `dist/server.js` compiled with its SSR generator. The exports map routes `node`, `deno`, and `worker` to the server
@@ -2154,9 +2281,7 @@ subpath because it reaches for `node:async_hooks`, which no browser bundle shoul
 
 Two requests rendering at the same moment never touch the same state, the same event bus, or the same models.
 
-### What renders
-
----
+## What renders
 
 Every component renders, including the ones that read a presenter. What they read depends on whether anything has
 run: a scope starts empty, so a page that loads its data in `onMount` — or a React effect — renders the same empty
@@ -2167,27 +2292,35 @@ To render *with* data, run the use case where the framework will wait for it, an
 wrote:
 
 ```tsx
-// Solid: a route's preload, awaited because entry-server runs in async mode
-await createUseCase(GetLeasesUseCase).execute();
+// Solid: a route's preload, awaited because entry-server runs in async mode.
+// useUseCase is an ordinary function in Solid, so it works outside a component.
+const { execute: loadLeases } = useUseCase(GetLeasesUseCase);
+await loadLeases();
 ```
 
 ```tsx
-// React: the host loads before it renders
+// React: the host loads before it renders. A hook cannot run outside a
+// component, so here the use case is constructed by hand and awaited.
 const html = await runInRequestScope(async () => {
-  await createUseCase(GetLeasesUseCase).execute();
+  await new GetLeasesUseCase().execute();
   return renderToString(<App />);
 });
 ```
 
-Nothing about a use case changes on a server. It writes the same state, announces the same change, and its
-presentations build the same models — in a scope belonging to that one request.
+A use case constructed by hand has a caller — the host — so its failure rejects to that `await` rather than reaching
+`ErrorHandler`, and it does not announce: the presenters read the state it wrote when they render, which is all a
+server render needs.
+
+In Solid the hook swallows the rejection the way it does in a browser and reports it on the request's error channel —
+where, in a preload, nothing is subscribed yet. Check `didSucceed()` if the page must not render without the data.
+
+Beyond that, nothing about a use case changes on a server. It writes the same state, its presentations build the same
+models, and whatever it announces is announced — in a scope belonging to that one request.
 
 What a use case cannot do on a server is read the browser: there is no `localStorage` to take a token from. Read what
 you need from the request and pass it in, the same way you would pass anything else browser-derived.
 
-### Handing the state to the browser
-
----
+## Handing the state to the browser
 
 A page rendered with data poses a question the markup cannot answer: the browser starts with an empty scope, renders
 its empty models, and hydration finds a tree that does not match — then fetches everything again. So the state that
@@ -2215,7 +2348,7 @@ assembled — after the use cases have finished — and puts the script in the h
 hydrates the tree it rendered, so a script inside it would be a mismatch; React hosts assemble their own document,
 which is the natural place for it.
 
-#### What can cross
+### What can cross
 
 Application state has to be data: objects, arrays, sets, maps, dates, primitives, and references shared between them,
 including cycles. All of that survives, which is why the payload is not JSON — `JSON.stringify` turns a `Set` into
@@ -2225,7 +2358,7 @@ A class instance cannot cross, because its prototype cannot: the browser would r
 behavior. State holding one raises an error naming the rule rather than the type. Keep behavior in use cases, where
 it belongs, and state stays transferable.
 
-#### Two things to know before you rely on it
+### Two things to know before you rely on it
 
 **Everything in state reaches the browser**, in the page, in plain text, cached wherever that HTML is cached. A token
 a use case wrote, a record fetched only to check a permission, an internal id — all of it. That is the trade the one
@@ -2235,9 +2368,7 @@ line makes, and it is why it is opt-in.
 applications already run inline scripts — the framework's own hydration script is one — but if yours does not,
 this is a deployment question, not a preference.
 
-### Rendering outside a request
-
----
+## Rendering outside a request
 
 The scope belongs to a request, and there has to be one. Constructing a presenter or executing a use case on a server
 outside a request throws rather than quietly falling back to a shared scope, because a silent fallback is the leak
@@ -2250,9 +2381,7 @@ Error: [magic-use-case] No request scope is available.
 For React that means the render has to be inside `runInRequestScope`. For Solid there is nothing to open — the
 request the framework is already serving is the scope.
 
-### Other hosts
-
----
+## Other hosts
 
 `createScope` and `setScopeResolver` are exported so a host neither adapter knows about can do the same:
 
@@ -2264,7 +2393,73 @@ setScopeResolver(() => scope);
 `createScope` returns an opaque handle. Giving it to `setScopeResolver` is the only thing an application can do with a
 scope — the state, the bookkeeping and the event bus inside it belong to the library.
 
-## Repository layout
+---
+
+# API at a glance
+
+Everything both adapters export, and nothing else — the adapters' public surface is the entire supported API, and a
+test pins it. `@magicdoor/magic-use-case-solid` adds one component, and the React server entry point adds two
+functions.
+
+| Export                         | Kind      | What it is                                                                                                                                          |
+| ------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UseCase<TState>`              | class     | Base class for your application logic. Extend it once per app to supply `initializeState()`, then extend that. See [Use cases](#3-use-cases).       |
+| `Presentation<TState, TModel>` | type      | `(state: TState) => TModel \| undefined` — a pure function from state to a model. See [Presentations](#2-presentations).                            |
+| `DeepReadonly<T>`              | type      | A model as the screen sees it: `readonly` arrays, `ReadonlyMap`/`ReadonlySet`, methods untouched. See [The model is readonly](#the-model-is-readonly). |
+| `MagicUseCaseTypes`            | interface | Augment it with `{ state: AppState }` so `usePresenter` accepts only presentations written against your state. See [Quick start, step 2](#2-give-every-use-case-that-state-once). |
+| `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params?), isLoading, didSucceed, progress }` for the run the component starts. See [Components](#1-components).                  |
+| `usePresenter(presentation)`   | hook      | Returns `{ model }` — `DeepReadonly<TModel>`, or `undefined` until state exists. Reads the presentation once, on first render.                       |
+| `Presenter`                    | class     | What `usePresenter` is built on. Public because the adapters need it; not for you to construct, extend, or wire anything with.                       |
+| `ErrorHandler`                 | component | Mount once at the root. Props: `onWillReportError(error) => boolean`, `renderErrorDialog({ error, onClose })`, optional `onDidReportError(error)`. See [Errors](#errors). |
+| `Navigator`                    | component | Mount once inside your router. Props: `onNavigate?(url)`. See [Wire the two events once](#wire-the-two-events-once-at-the-root).                   |
+| `onError(handler)`             | function  | Subscribe to the error channel directly; returns an unsubscribe function. See [Listening from outside a component](#listening-from-outside-a-component). |
+| `onNavigation(handler)`        | function  | Subscribe to the navigation channel directly; returns an unsubscribe function.                                                                      |
+| `createScope(initialState?)`   | function  | An opaque handle to one running application's state and bookkeeping. See [Give each test its own state](#give-each-test-its-own-state).             |
+| `setScopeResolver(() => scope)` | function | Tells the library which scope to use. Tests and hosts neither adapter knows about call it.                                                          |
+| `StateTransfer`                | component | **Solid only.** Rendered once, anywhere in the tree, to hand server state to the browser. See [Handing the state to the browser](#handing-the-state-to-the-browser). |
+
+`@magicdoor/magic-use-case-react/server`, behind its own entry point because it reaches for `node:async_hooks`:
+
+| Export                        | What it is                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `runInRequestScope(fn)`       | Runs a render with a scope belonging to that request. See [Server-side rendering](#server-side-rendering). |
+| `serializedStateScript()`     | The state that render produced, as a `<script>` the browser runs before it hydrates.                    |
+
+## What a use case can do
+
+The members of `UseCase` you write against. All are `protected` except `execute`; `runLogic` and `initializeState`
+are abstract and yours to implement.
+
+| Member                                    | What it does                                                                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `constructor(onProgress?)`                | The only constructor argument: a `(percent: number) => void` reporter, which `useUseCase` supplies. See [Progress](#progress-for-work-the-user-watches). |
+| `execute(params?): Promise<void>`         | Runs `runLogic`, de-duplicated by class and `JSON.stringify(params)`. Rejects when `runLogic` throws. See [One run, not five](#one-run-not-five). |
+| `runLogic(params): Promise<void>`         | The whole of the use case. Abstract.                                                                                                 |
+| `initializeState(): Promise<TState>`      | Called once per scope, by whichever use case runs first. Abstract — put it on one base class. See [Bootstrapping](#bootstrapping).   |
+| `getState(): TState`                      | The live state, writable only while this use case is running. Call it again after every `await`. See [Application state](#4-application-state). |
+| `detach(UseCaseClass, params?): void`     | Starts a use case nobody waits for. See [Work the caller does not wait for](#work-the-caller-does-not-wait-for).                     |
+| `navigate(url): void`                     | Puts a url on the navigation channel; `Navigator` delivers it. See [What this buys you](#what-this-buys-you).                        |
+| `report(error): void`                     | Puts an error on the error channel without throwing, for a use case that recovers and still wants the dialog. Rare.                  |
+| `resetAppState(): void`                   | Clears state, the retained copy, the in-flight map and any bootstrap; the next `execute()` bootstraps again. See [Resetting state](#resetting-state). |
+| `onProgress?`                             | The reporter passed to the constructor, for calling or handing down to a nested use case.                                            |
+
+---
+
+# When something throws
+
+Every error the library itself raises starts with `[magic-use-case]`, so this is what to search for.
+
+| Message                                                            | Why                                                                                                                                                              |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cannot <write> outside a use case.`                               | Something other than a running use case wrote to `getState()` — a component, a presentation, an SDK callback, a module holding a reference. Move the write into a `runLogic()`. See [Application state](#4-application-state). |
+| `Resetting application state is only allowed inside a running use case.` | `resetAppState()` was reached from outside a running use case — `protected` is only a compile-time boundary. See [Resetting state](#resetting-state).        |
+| `No request scope is available.`                                   | A use case executed or a presenter was constructed on a server outside a request. React: wrap the render in `runInRequestScope()`. See [Rendering outside a request](#rendering-outside-a-request). |
+| `Application state cannot be handed to the browser.`               | State holds a class instance, and a prototype cannot cross to the browser. Keep state to plain data. See [What can cross](#what-can-cross).                      |
+| `A presentation threw; its model is left empty.` (console, not thrown) | A presentation raised. It is logged with the error, and its model stays `undefined` so the render and the other screens carry on. See [Application state](#4-application-state). |
+
+---
+
+# Repository layout
 
 ```
 packages/
@@ -2277,7 +2472,9 @@ packages/
 the adapters' public exports are the entire supported API surface. This keeps internals — the event bus, the use-case
 factory — free to change without a breaking release. CI enforces that no published bundle references core.
 
-## Development
+---
+
+# Development
 
 ```bash
 npm install
@@ -2292,10 +2489,14 @@ npm run check-package  # how the published tarball resolves, before it exists
 Releases are managed with [changesets](https://github.com/changesets/changesets). Add one with `npm run changeset`;
 merging the generated "Version Packages" PR publishes to npm with provenance.
 
-## Credits
+---
+
+# Credits
 
 Created by Norbert Nemes.
 
-## License
+---
+
+# License
 
 Apache-2.0 © MagicDoor, Inc.
