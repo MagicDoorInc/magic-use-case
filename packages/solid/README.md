@@ -12,7 +12,6 @@ npm install @magicdoor/magic-use-case-solid
 - `UseCase` — base class for your application logic
 - `Presentation` — the type of a function mapping state to a view model
 - `DeepReadonly` — the type of a model as a screen sees it
-- `MagicUseCaseTypes` — augment it with your state type, so `usePresenter` accepts only presentations written against it
 - `useUseCase` — execute a use case, with loading, progress and success state
 - `usePresenter` — subscribe a component to a presentation's model
 - `Presenter` — the presentation holder behind `usePresenter`, for wiring of your own

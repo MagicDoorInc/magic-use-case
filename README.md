@@ -127,9 +127,6 @@ you at the offending line. The rest are convention, and yours to hold; each link
 - **Server rendering cannot leak one user's state into another's.** Both server builds resolve a scope per request,
   so two requests never share state, the event bus, or a model — and rendering outside a request throws rather than
   falling back to a shared one. See [Server-side rendering](#server-side-rendering).
-- **A presentation cannot read a shape the app never emits.** Once the app names its state type through
-  `MagicUseCaseTypes`, `usePresenter` rejects any presentation written against a different one, at compile time. See
-  [Quick start, step 2](#2-give-every-use-case-that-state-once).
 
 **What is convention, and yours to hold:**
 
@@ -233,13 +230,13 @@ export interface AppState {
   tenants: Tenant[];
 }
 
+/** The empty state, written once: `initializeState()` returns one, and tests build their own. */
 export const createAppState = (): AppState => ({ tenants: [] });
-
-export const appState = createAppState();
 ```
 
-A factory rather than a literal, because a server renders many requests and a test runs many cases — each one needs
-its own state, and only a function can hand out a fresh one.
+A factory rather than a literal because two things need an empty state and neither can borrow the other's: the app,
+which asks for one through `initializeState()` in the next step, and a test, which hands one to `createScope()` so it
+owns the object it asserts on. Define the empty shape here and both call it.
 
 ## 2. Give every use case that state, once
 
@@ -249,33 +246,17 @@ than on every use case you write.
 ```ts
 // baseUseCase.ts
 import { UseCase } from "@magicdoor/magic-use-case-react";
-import { AppState, appState } from "./state";
+import { AppState, createAppState } from "./state";
 
 export abstract class BaseUseCase extends UseCase<AppState> {
   protected async initializeState() {
-    return appState;
+    return createAppState();
   }
 }
 ```
 
-Returning the module-level `appState` is fine even though step 1 asked for a factory: the library deep-clones what
-`initializeState()` returns and the clone becomes the live state, so the export is a template rather than the thing
-itself — see [State is adopted, not borrowed](#state-is-adopted-not-borrowed). Tests skip this path and hand a fresh
-`createAppState()` straight to `createScope()`, which is where the factory earns its keep.
-
-Then tell the library which type that is, so a presentation cannot quietly declare a different one:
-
-```ts
-declare module "@magicdoor/magic-use-case-react" {
-  interface MagicUseCaseTypes {
-    state: AppState;
-  }
-}
-```
-
-`usePresenter` now accepts only presentations written against `AppState`. Without it, a presentation's state type is
-whatever the presentation claims, so one written against the wrong shape compiles cleanly and throws at runtime — on
-the screen, not in the tests.
+`initializeState()` runs once per scope — once per page in the browser, once per request on a server — and what it
+returns is adopted as the live state; see [State is adopted, not borrowed](#state-is-adopted-not-borrowed).
 
 ## 3. Write what the app does
 
@@ -340,6 +321,9 @@ export const presentTenants: Presentation<AppState, PresentableTenants> = (
   isEmpty: state.tenants.length === 0,
 });
 ```
+
+`Presentation<AppState, PresentableTenants>` is the whole of the type check: the body is verified against `AppState`
+here, and `usePresenter` takes the state type from the presentation it is given.
 
 Export it at module scope. Sharing is by function identity, so every screen that passes this same function shares one
 run of it — see [Presentations](#2-presentations).
@@ -547,7 +531,7 @@ made into a boundary:
 | Changing one nested field      | an action and a reducer case (Immer inside RTK)             | one `set`                                        | one assignment inside `runLogic`                                                  |
 | A flow of several steps        | a thunk, a saga, or listener middleware                     | an async action                                  | a higher-order use case, with one `isLoading` for the whole flow                  |
 | Concurrent runs of the same op | your problem, unless it is an RTK Query query               | your problem                                     | de-duplicated by parameters; joiners share the run                                |
-| Enforced by                    | development-mode checks for mutation and serializability    | nothing                                          | the compiler (`DeepReadonly`, `MagicUseCaseTypes`) and a runtime proxy on writes  |
+| Enforced by                    | development-mode checks for mutation and serializability    | nothing                                          | the compiler (`DeepReadonly`) and a runtime proxy on writes                       |
 | Tested by                      | reducers as pure functions; thunks with a mocked `dispatch` | calling store functions                          | running the use case against a stubbed transport; calling the presentation        |
 | Framework                      | core is framework-free; `react-redux` binds it              | React; a vanilla store exists                    | plain TypeScript core; React and Solid adapters, one import apart                 |
 
@@ -2406,7 +2390,6 @@ functions.
 | `UseCase<TState>`              | class     | Base class for your application logic. Extend it once per app to supply `initializeState()`, then extend that. See [Use cases](#3-use-cases).       |
 | `Presentation<TState, TModel>` | type      | `(state: TState) => TModel \| undefined` — a pure function from state to a model. See [Presentations](#2-presentations).                            |
 | `DeepReadonly<T>`              | type      | A model as the screen sees it: `readonly` arrays, `ReadonlyMap`/`ReadonlySet`, methods untouched. See [The model is readonly](#the-model-is-readonly). |
-| `MagicUseCaseTypes`            | interface | Augment it with `{ state: AppState }` so `usePresenter` accepts only presentations written against your state. See [Quick start, step 2](#2-give-every-use-case-that-state-once). |
 | `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params?), isLoading, didSucceed, progress }` for the run the component starts. See [Components](#1-components).                  |
 | `usePresenter(presentation)`   | hook      | Returns `{ model }` — `DeepReadonly<TModel>`, or `undefined` until state exists. Reads the presentation once, on first render.                       |
 | `Presenter`                    | class     | What `usePresenter` is built on. Public because the adapters need it; not for you to construct, extend, or wire anything with.                       |

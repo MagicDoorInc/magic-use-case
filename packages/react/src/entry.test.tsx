@@ -25,8 +25,8 @@ function Counter() {
 afterEach(cleanup);
 
 /**
- * The entry declares its own `usePresenter` so an application's module
- * augmentation can pin the state type. That indirection is what these cover.
+ * What the package entry hands an application, exercised through the entry
+ * rather than the hook's own module.
  */
 describe('the package entry', () => {
   it('exposes a presenter hook the application reads its own state through', async () => {
