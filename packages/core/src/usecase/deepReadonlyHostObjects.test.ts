@@ -1,3 +1,7 @@
+// `File` became a global in Node 20, and these packages support Node 18. The
+// same constructor has been on `node:buffer` since 18.13, so taking it from
+// there is what lets this run on the oldest version the packages claim.
+import { File } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 import { deepReadonly } from './deepReadonly';
 
