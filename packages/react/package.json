@@ -1,6 +1,6 @@
 {
   "name": "@magicdoor/magic-use-case-react",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "React bindings for magic-use-case — clean-architecture use cases and presenters for front-end TypeScript.",
   "type": "module",
   "main": "./dist/index.js",
