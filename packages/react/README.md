@@ -12,7 +12,7 @@ npm install @magicdoor/magic-use-case-react
 - `UseCase` — base class for your application logic
 - `Presentation` — the type of a function mapping state to a view model
 - `DeepReadonly` — the type of a model as a screen sees it
-- `useUseCase` — execute a use case, with loading, progress and success state
+- `useUseCase` — execute a use case, with loading and progress state; `execute` resolves to whether it succeeded
 - `usePresenter` — subscribe a component to a presentation's model
 - `Presenter` — the presentation holder behind `usePresenter`, for wiring of your own
 - `ErrorHandler` — error boundary wired to the use-case error channel

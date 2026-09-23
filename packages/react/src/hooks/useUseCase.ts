@@ -6,19 +6,17 @@ export function useUseCase<T>(
 ) {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [didSucceed, setDidSucceed] = useState(false);
 
   const useCase = useMemo(() => createUseCase(UseCaseClass, setProgress), [UseCaseClass]);
 
   const execute = useCallback(
-    async (params?: unknown) => {
+    async (params?: unknown): Promise<boolean> => {
       setIsLoading(true);
-      setDidSucceed(false);
       try {
         await useCase.execute(params);
-        setDidSucceed(true);
+        return true;
       } catch {
-        setDidSucceed(false);
+        return false;
       } finally {
         setIsLoading(false);
       }
@@ -26,5 +24,5 @@ export function useUseCase<T>(
     [useCase]
   );
 
-  return { execute, isLoading, didSucceed, progress };
+  return { execute, isLoading, progress };
 }

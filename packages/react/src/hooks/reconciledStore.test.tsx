@@ -176,4 +176,14 @@ describe('useReconciledStore', () => {
 
     expect(read()).toBe(after);
   });
+
+  it('takes a different file even though it has no keys to compare', () => {
+    const first = new File(['a'], 'a.png');
+    const second = new File(['b'], 'b.png');
+    const { read, write } = store({ file: first });
+
+    write({ file: second });
+
+    expect(read()!.file).toBe(second);
+  });
 });
