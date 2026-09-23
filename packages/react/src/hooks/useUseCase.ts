@@ -6,25 +6,23 @@ export function useUseCase<T>(
 ) {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [didSucceed, setDidSucceed] = useState(false);
 
   const useCase = useMemo(() => createUseCase(UseCaseClass, setProgress), [UseCaseClass]);
 
   const execute = useCallback(
-    async (params?: unknown) => {
+    async (params?: unknown): Promise<boolean> => {
       setIsLoading(true);
-      setDidSucceed(false);
+      let succeeded = true;
       try {
         await useCase.execute(params);
-        setDidSucceed(true);
       } catch {
-        setDidSucceed(false);
-      } finally {
-        setIsLoading(false);
+        succeeded = false;
       }
+      setIsLoading(false);
+      return succeeded;
     },
     [useCase]
   );
 
-  return { execute, isLoading, didSucceed, progress };
+  return { execute, isLoading, progress };
 }

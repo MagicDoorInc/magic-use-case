@@ -1,3 +1,5 @@
+import { isBlob } from './deepReadonly';
+
 /**
  * Deep clone that preserves prototypes, so class-based application state stays
  * class-based: `instanceof` still holds, methods still resolve, and accessors
@@ -52,6 +54,7 @@ export function deepClone<T>(value: T, seen: WeakMap<object, unknown> = new Weak
 
   if (value instanceof Date) return new Date(value.getTime()) as unknown as T;
   if (value instanceof RegExp) return new RegExp(value.source, value.flags) as unknown as T;
+  if (isBlob(asObject)) return value;
 
   const collection = cloneCollection(asObject, seen);
   if (collection !== undefined) return collection as T;

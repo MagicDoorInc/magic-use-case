@@ -273,7 +273,7 @@ export class LoadTenantsUseCase extends BaseUseCase {
 ```
 
 No try/catch **here**, because this use case has nothing to add: if the gateway throws, the failure propagates,
-`didSucceed` goes false, and `ErrorHandler` shows it — all of which you get already. A `try` that catches and
+`execute` resolves to `false`, and `ErrorHandler` shows it — all of which you get already. A `try` that catches and
 rethrows the same error is pure ceremony.
 
 Catch when the use case has something to _decide_ — and it often does. Reclassifying is the usual reason: a `NotFound`
@@ -359,8 +359,8 @@ Notice what the component does _not_ contain: no `fetch`, no `.sort()`, no `.map
 0` check, and no try/catch. Each of those has a home, and it is not here. The next chapter is what that discipline
 buys you; the rest of the document is each player in detail.
 
-**You rarely need to track in state whether a use case worked.** `useUseCase` already reports `isLoading`,
-`didSucceed` and `progress` for the run it started, and the failure itself already reaches `ErrorHandler` — so reach
+**You rarely need to track in state whether a use case worked.** `useUseCase` already reports `isLoading`
+and `progress` for the run it started, `execute` resolves to whether it succeeded, and the failure itself already reaches `ErrorHandler` — so reach
 for those first and let application state hold what the app _knows_, which here is the tenants.
 
 Sometimes you do need it, and that is fine: a fact that must outlive the run, because something loaded on one screen
@@ -555,17 +555,32 @@ either.
 Draws the screen and forwards the click. There is deliberately very little to say about it, and that is the point:
 
 ```tsx
-const { execute: pay, isLoading, didSucceed } = useUseCase(PayUseCase);
+const { execute: pay, isLoading } = useUseCase(PayUseCase);
 const { model } = usePresenter(presentPayment);
 ```
 
 Those two hooks are the whole of the component's API:
 
-- `useUseCase(SomeUseCase)` gives you `execute`, plus `isLoading` (true while the run it started is in flight),
-  `didSucceed` (false until a run finishes without throwing, and false again the moment the next one starts) and
-  `progress` (see [Progress](#progress-for-work-the-user-watches)). They describe *that* run — not the use case
-  globally, and not anything a nested or detached run does.
+- `useUseCase(SomeUseCase)` gives you `execute`, plus `isLoading` (true while the run it started is in flight) and
+  `progress` (see [Progress](#progress-for-work-the-user-watches)). `execute` never rejects: it resolves to `true`
+  when the run finished without throwing and `false` when it failed, the failure itself having gone to
+  `ErrorHandler`. All three describe *that* run — not the use case globally, and not anything a nested or detached
+  run does.
 - `usePresenter(somePresentation)` gives you `model`, which is `undefined` until state exists and readonly thereafter.
+
+**Act on a run where you started it.** Something the screen does only because this run worked — clear the input,
+close the sheet, go to the next page — goes after the `await`, in the handler that called `execute`:
+
+```tsx
+const send = async () => {
+  if (await sendMessage({ chatId, message })) setInput('');
+};
+```
+
+Not in an effect watching for success. There is no success flag to watch: a flag is readable only on a later render,
+stays set after the run, and makes the follow-up a state update inside an effect, which React's lint rules rightly
+reject. Whether something loaded, as opposed to whether this click worked, is a fact about the app — render it from a
+presentation's model, where it survives the component that ran it.
 
 **It holds** markup, layout, and local view state that nothing else could care about — which tab is open, whether a
 menu is expanded, an uncommitted keystroke on its way to an edit use case.
@@ -1023,8 +1038,8 @@ class InitializeAppUseCase extends BaseUseCase {
 The trigger is concrete: you are about to `await` a second use case and branch on what the first one did. That branch
 is a business rule, and a component is the wrong place for it. Two things follow from putting it here:
 
-- **The screen reads one loading state.** `useUseCase(InitializeAppUseCase)` gives you `isLoading` and `didSucceed`
-  for the whole flow. Do not hand-assemble it from the inner ones — `isLoadingA() || isLoadingB() || …` is the smell
+- **The screen reads one loading state.** `useUseCase(InitializeAppUseCase)` gives you `isLoading`, and `execute`'s
+  result, for the whole flow. Do not hand-assemble it from the inner ones — `isLoadingA() || isLoadingB() || …` is the smell
   that the sequencing is in the wrong layer.
 - **Staleness is handled inside**, not in the component. Key state by what it describes so two runs cannot overwrite
   each other, and re-read the subject after each `await` so a run whose subject changed can stop.
@@ -1079,11 +1094,7 @@ class PayRentUseCase extends BaseUseCase {
 ```
 
 ```tsx
-const {
-  execute: payRent,
-  isLoading,
-  didSucceed,
-} = useUseCase(PayRentUseCase);
+const { execute: payRent, isLoading } = useUseCase(PayRentUseCase);
 ```
 
 Contexts are still the right tool for what they are for — a theme, a locale, a router. They are not a place to keep
@@ -1185,8 +1196,8 @@ flight rather than starting a second.
 
 ### When not to
 
-- **Anything the user watches.** A detached run has no caller, so `isLoading`, `didSucceed` and `progress` describe
-  only the starter. A tenant uploading four photos should see the bar move, so that one is awaited.
+- **Anything the user watches.** A detached run has no caller, so `isLoading`, `progress` and `execute`'s result
+  describe only the starter. A tenant uploading four photos should see the bar move, so that one is awaited.
 - **Anything a later step depends on.** Detaching breaks the sequence — that is its whole purpose — so a step whose
   result the next one needs must be awaited.
 - **Anything whose failure should stop the flow.** A detached failure is reported, not thrown, so it cannot abort
@@ -2296,7 +2307,7 @@ A use case constructed by hand has a caller — the host — so its failure reje
 server render needs.
 
 In Solid the hook swallows the rejection the way it does in a browser and reports it on the request's error channel —
-where, in a preload, nothing is subscribed yet. Check `didSucceed()` if the page must not render without the data.
+where, in a preload, nothing is subscribed yet. Check what `execute` resolved to if the page must not render without the data.
 
 Beyond that, nothing about a use case changes on a server. It writes the same state, its presentations build the same
 models, and whatever it announces is announced — in a scope belonging to that one request.
@@ -2390,7 +2401,7 @@ functions.
 | `UseCase<TState>`              | class     | Base class for your application logic. Extend it once per app to supply `initializeState()`, then extend that. See [Use cases](#3-use-cases).       |
 | `Presentation<TState, TModel>` | type      | `(state: TState) => TModel \| undefined` — a pure function from state to a model. See [Presentations](#2-presentations).                            |
 | `DeepReadonly<T>`              | type      | A model as the screen sees it: `readonly` arrays, `ReadonlyMap`/`ReadonlySet`, methods untouched. See [The model is readonly](#the-model-is-readonly). |
-| `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params?), isLoading, didSucceed, progress }` for the run the component starts. See [Components](#1-components).                  |
+| `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params?), isLoading, progress }` for the run the component starts; `execute` resolves to whether it succeeded. See [Components](#1-components).                  |
 | `usePresenter(presentation)`   | hook      | Returns `{ model }` — `DeepReadonly<TModel>`, or `undefined` until state exists. Reads the presentation once, on first render.                       |
 | `Presenter`                    | class     | What `usePresenter` is built on. Public because the adapters need it; not for you to construct, extend, or wire anything with.                       |
 | `ErrorHandler`                 | component | Mount once at the root. Props: `onWillReportError(error) => boolean`, `renderErrorDialog({ error, onClose })`, optional `onDidReportError(error)`. See [Errors](#errors). |

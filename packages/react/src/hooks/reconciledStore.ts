@@ -24,6 +24,7 @@ export function useReconciledStore<T>(initialState: T | (() => T)) {
 function deepEqual(obj1: unknown, obj2: unknown): boolean {
   if (obj1 == null || obj2 == null || typeof obj1 !== 'object' || typeof obj2 !== 'object') return obj1 === obj2;
   if (obj1 instanceof Date && obj2 instanceof Date) return obj1.getTime() === obj2.getTime();
+  if (isBlob(obj1) || isBlob(obj2)) return obj1 === obj2;
   if (obj1 instanceof Set && obj2 instanceof Set) {
     if (obj1.size !== obj2.size) return false;
     const arr2 = [...obj2];
@@ -84,4 +85,9 @@ function cloneWithNewReferences<T>(obj: T, referenceObj?: T): T {
     return hasChanges ? newObj : obj;
   }
   return obj;
+}
+
+function isBlob(value: object): boolean {
+  const tag = Object.prototype.toString.call(value);
+  return tag === '[object Blob]' || tag === '[object File]';
 }

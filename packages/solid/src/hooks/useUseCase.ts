@@ -4,21 +4,19 @@ import { createSignal } from 'solid-js';
 export function useUseCase<T>(UseCaseClass: UseCaseClass<T>) {
   const [isLoading, setIsLoading] = createSignal(false);
   const [progress, setProgress] = createSignal(0);
-  const [didSucceed, setDidSucceed] = createSignal(false);
 
   const useCase = createUseCase(UseCaseClass, setProgress);
 
-  const execute = async (params?: unknown) => {
+  const execute = async (params?: unknown): Promise<boolean> => {
     setIsLoading(true);
-    setDidSucceed(false);
+    let succeeded = true;
     try {
       await useCase.execute(params);
-      setDidSucceed(true);
     } catch {
-      setDidSucceed(false);
-    } finally {
-      setIsLoading(false);
+      succeeded = false;
     }
+    setIsLoading(false);
+    return succeeded;
   };
-  return { execute, isLoading, didSucceed, progress };
+  return { execute, isLoading, progress };
 }

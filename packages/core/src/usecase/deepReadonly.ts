@@ -78,6 +78,11 @@ function mustReturnRaw(target: object, prop: string | symbol): boolean {
     && descriptor.writable === false;
 }
 
+export function isBlob(value: object): boolean {
+  const tag = Object.prototype.toString.call(value);
+  return tag === '[object Blob]' || tag === '[object File]';
+}
+
 function wrap(value: unknown, policy: Policy): unknown {
   return isObject(value) ? proxyFor(value, policy) : value;
 }
@@ -210,6 +215,7 @@ function createObjectProxy(target: object, policy: Policy): object {
 function proxyFor<T extends object>(obj: T, policy: Policy): T {
   if (obj === null || typeof obj !== 'object') return obj;
   if ((obj as Record<symbol, unknown>)[policy.marker]) return obj;
+  if (isBlob(obj)) return obj;
 
   const cached = policy.cache.get(obj);
   if (cached) return cached as T;

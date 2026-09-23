@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { UseCase, createUseCase, onError, type UseCaseClass } from '@magicdoor/magic-use-case-core';
+import { useState } from 'react';
 import { useUseCase } from './useUseCase';
 
 class AppState {
@@ -52,14 +53,15 @@ class Waits extends Base {
 }
 
 function Screen({ useCase }: { useCase: UseCaseClass<AppState> }) {
-  const { execute, isLoading, didSucceed, progress } = useUseCase(useCase);
+  const { execute, isLoading, progress } = useUseCase(useCase);
+  const [outcome, setOutcome] = useState('none');
   return (
     <>
-      <button data-testid="run" onClick={() => void execute()}>
+      <button data-testid="run" onClick={() => void execute().then((ok) => setOutcome(String(ok)))}>
         run
       </button>
       <span data-testid="loading">{String(isLoading)}</span>
-      <span data-testid="succeeded">{String(didSucceed)}</span>
+      <span data-testid="succeeded">{outcome}</span>
       <span data-testid="progress">{String(progress)}</span>
     </>
   );
@@ -77,9 +79,9 @@ afterEach(() => {
 });
 
 describe('useUseCase', () => {
-  it('reports success once the use case has run', async () => {
+  it('resolves execute with true once the use case has run', async () => {
     render(<Screen useCase={Base} />);
-    expect(read('succeeded')).toBe('false');
+    expect(read('succeeded')).toBe('none');
 
     run();
 
@@ -100,16 +102,16 @@ describe('useUseCase', () => {
     await waitFor(() => expect(read('loading')).toBe('false'));
   });
 
-  it('reports failure without throwing at the component', async () => {
+  it('resolves execute with false on failure, without throwing at the component', async () => {
     const seen: Error[] = [];
     const stop = onError((error) => seen.push(error));
 
     render(<Screen useCase={Fails} />);
     run();
 
-    await waitFor(() => expect(seen).toHaveLength(1));
+    await waitFor(() => expect(read('succeeded')).toBe('false'));
+    expect(seen).toHaveLength(1);
     expect(seen[0]!.message).toBe('boom');
-    expect(read('succeeded')).toBe('false');
     stop();
   });
 
@@ -119,8 +121,8 @@ describe('useUseCase', () => {
     render(<Screen useCase={Fails} />);
     run();
 
-    await waitFor(() => expect(read('loading')).toBe('false'));
-    expect(read('succeeded')).toBe('false');
+    await waitFor(() => expect(read('succeeded')).toBe('false'));
+    expect(read('loading')).toBe('false');
     stop();
   });
 

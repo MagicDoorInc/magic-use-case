@@ -176,4 +176,22 @@ describe('usePresenter', () => {
 
     expect(model!()).toEqual({ n: 1 });
   });
+
+  it('hands out a file in the model as the file itself', async () => {
+    const file = new File(['x'], 'roof.png');
+    class Attach extends Bump {
+      protected async runLogic() {
+        (this.getState() as AppState & { file?: File }).file = file;
+      }
+    }
+    let model: Accessor<{ file?: File } | undefined> | undefined;
+    render(() => {
+      model = usePresenter((state: AppState & { file?: File }) => ({ file: state.file })).model;
+      return null;
+    });
+
+    await createUseCase(Attach).execute();
+
+    expect(model!()?.file).toBe(file);
+  });
 });
