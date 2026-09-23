@@ -9,14 +9,14 @@ export function useUseCase<T>(UseCaseClass: UseCaseClass<T>) {
 
   const execute = async (params?: unknown): Promise<boolean> => {
     setIsLoading(true);
+    let succeeded = true;
     try {
       await useCase.execute(params);
-      return true;
     } catch {
-      return false;
-    } finally {
-      setIsLoading(false);
+      succeeded = false;
     }
+    setIsLoading(false);
+    return succeeded;
   };
   return { execute, isLoading, progress };
 }

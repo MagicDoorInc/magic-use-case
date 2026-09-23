@@ -12,14 +12,14 @@ export function useUseCase<T>(
   const execute = useCallback(
     async (params?: unknown): Promise<boolean> => {
       setIsLoading(true);
+      let succeeded = true;
       try {
         await useCase.execute(params);
-        return true;
       } catch {
-        return false;
-      } finally {
-        setIsLoading(false);
+        succeeded = false;
       }
+      setIsLoading(false);
+      return succeeded;
     },
     [useCase]
   );
