@@ -42,6 +42,12 @@ function cloneCollection(value: object, seen: WeakMap<object, unknown>): unknown
   return undefined;
 }
 
+function keepSealing<T extends object>(original: object, copy: T): T {
+  if (Object.isFrozen(original)) Object.freeze(copy);
+  else if (Object.isSealed(original)) Object.seal(copy);
+  return copy;
+}
+
 export function deepClone<T>(value: T, seen: WeakMap<object, unknown> = new WeakMap()): T {
   if (value === null || typeof value !== 'object') return value;
 
@@ -57,7 +63,7 @@ export function deepClone<T>(value: T, seen: WeakMap<object, unknown> = new Weak
   if (isBlob(asObject)) return value;
 
   const collection = cloneCollection(asObject, seen);
-  if (collection !== undefined) return collection as T;
+  if (collection !== undefined) return keepSealing(asObject, collection as object) as T;
 
   // Anything else: rebuild on the same prototype and copy own descriptors, so
   // getters/setters stay accessors instead of being invoked and frozen as data.
@@ -82,8 +88,5 @@ export function deepClone<T>(value: T, seen: WeakMap<object, unknown> = new Weak
     }
   }
 
-  if (Object.isFrozen(asObject)) Object.freeze(copy);
-  else if (Object.isSealed(asObject)) Object.seal(copy);
-
-  return copy as T;
+  return keepSealing(asObject, copy) as T;
 }

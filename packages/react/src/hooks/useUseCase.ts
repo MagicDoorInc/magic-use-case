@@ -1,8 +1,8 @@
-import { createUseCase, type UseCaseClass } from '@magicdoor/magic-use-case-core';
+import { createUseCase, type UseCaseArgs, type UseCaseClass } from '@magicdoor/magic-use-case-core';
 import { useState, useCallback, useMemo } from 'react';
 
-export function useUseCase<T>(
-  UseCaseClass: UseCaseClass<T>
+export function useUseCase<T, P = void>(
+  UseCaseClass: UseCaseClass<T, P>
 ) {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -10,11 +10,11 @@ export function useUseCase<T>(
   const useCase = useMemo(() => createUseCase(UseCaseClass, setProgress), [UseCaseClass]);
 
   const execute = useCallback(
-    async (params?: unknown): Promise<boolean> => {
+    async (...params: UseCaseArgs<P>): Promise<boolean> => {
       setIsLoading(true);
       let succeeded = true;
       try {
-        await useCase.execute(params);
+        await useCase.execute(...params);
       } catch {
         succeeded = false;
       }

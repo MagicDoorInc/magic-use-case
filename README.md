@@ -164,8 +164,6 @@ waiting to happen:
   overwrite each other. See [Two screens, one use case](#two-screens-one-use-case-different-filters).
 - **Do the waiting first, then write in one uninterrupted block**, and never carry a reference to part of state across
   an `await`. See [Application state](#4-application-state).
-- **No `Set` or `Map` in a use case's parameters.** The de-duplication key is `JSON.stringify(params)`, and both
-  stringify to `{}`. Use a sorted array. See [One run, not five](#one-run-not-five).
 - **Import gateways as module singletons; never construct one in a use case.** Inject the network manager into the
   gateway once, at its `export const`. See [Where the gateways come from](#where-the-gateways-come-from).
 - **Map every response at the gateway. Always.** `return response.json()` hands the backend's shape to the whole app.
@@ -183,11 +181,12 @@ waiting to happen:
 
 The words the chapters use before they explain them. One line each; the chapter has the rest.
 
-- **Run** — one `execute()` of a use case with one set of parameters. Runs are keyed by the class and
-  `JSON.stringify(params)`; a second call with the same key while the first is in flight joins it rather than starting
+- **Run** — one `execute()` of a use case with one set of parameters. Runs are keyed by the class and its
+  parameters, compared by value; a second call with the same key while the first is in flight joins it rather than starting
   another.
 - **Announce** — what a run does when it finishes: it tells every presenter that state changed, models are rebuilt,
   screens update. Only a run with no caller announces; everything written beneath it travels in that one announcement.
+  A run that changed nothing — it only read, or wrote back the value already there — announces nothing.
 - **Nested run** — a use case constructed and awaited inside another's `runLogic` (`await new X().execute()`). It has a
   caller, so it writes state but does not announce; its caller does, once, when the whole flow finishes.
 - **Detached run** — started with `this.detach(SomeUseCase, params)`. Not nested and nobody waits for it: the starter
@@ -203,8 +202,9 @@ The words the chapters use before they explain them. One line each; the chapter 
 - **Bootstrap** — the first `execute()` in a scope calling `initializeState()` exactly once to adopt a starting state.
   `resetAppState()` is the only way back to an uninitialized scope.
 - **Presentation** — a pure function from state to a model. Yours; the unit you test.
-- **Presenter** — the library's object that holds one presentation, reruns it on every announcement, and hands the
-  model to its subscribers. `usePresenter(presentation)` makes one; you never write one and never test one.
+- **Presenter** — the library's object that holds one presentation, reruns it on every announcement that changed
+  something it read, and hands the model to its subscribers. `usePresenter(presentation)` makes one; you never write
+  one and never test one.
 - **Model** (view model) — what a presentation returns and a component renders: already formatted, filtered and
   labeled. It reaches the component as `DeepReadonly<TModel>`, and one model is shared by every screen using that
   presentation.
@@ -248,7 +248,7 @@ than on every use case you write.
 import { UseCase } from "@magicdoor/magic-use-case-react";
 import { AppState, createAppState } from "./state";
 
-export abstract class BaseUseCase extends UseCase<AppState> {
+export abstract class BaseUseCase<TParams = void> extends UseCase<AppState, TParams> {
   protected async initializeState() {
     return createAppState();
   }
@@ -257,6 +257,11 @@ export abstract class BaseUseCase extends UseCase<AppState> {
 
 `initializeState()` runs once per scope — once per page in the browser, once per request on a server — and what it
 returns is adopted as the live state; see [State is adopted, not borrowed](#state-is-adopted-not-borrowed).
+
+`TParams` is what the use case takes. A use case declares it once, as `extends BaseUseCase<PaymentRequest>`, and from
+then on `runLogic`, `execute`, `detach` and the `execute` that `useUseCase` returns all expect a `PaymentRequest` —
+`pay("oops")` and `pay()` no longer compile. A use case that takes nothing leaves it out, and its `execute()` is called
+with no argument.
 
 ## 3. Write what the app does
 
@@ -685,12 +690,17 @@ What that means in each adapter:
   see an unchanged reference and skip. If nothing at all changed, the store returns the previous state and React does
   not re-render.
 
-So there are three separate reasons the UI does less work than the naive reading suggests, and they stack:
+So there are five separate reasons the UI does less work than the naive reading suggests, and they stack:
 
 1. **A run announces only if nobody is waiting on it** — a flow of ten nested steps produces one announcement, not
    ten.
-2. **One run per presentation**, however many screens hold it.
-3. **One rebuild per changed value**, because the reconciled store keeps the rest.
+2. **A run announces only if it changed something.** One that looked and found nothing to do — a scroll handler
+   checking whether the next page is needed — costs no presentation anything.
+3. **A presentation re-runs only if something it read changed.** The library records what each presentation reads
+   and what each run writes, so a keystroke in a form re-runs the form's presentation and leaves the chat list alone.
+   A method called on an object in state — or a getter or setter — counts as reading or writing all of that object.
+4. **One run per presentation**, however many screens hold it.
+5. **One rebuild per changed value**, because the reconciled store keeps the rest.
 
 The practical consequence for you: write presentations plainly. Map, sort, format, derive a label — do it every time,
 on the whole model, without memoizing by hand. The identity work that makes rendering cheap has already been done
@@ -781,7 +791,7 @@ Decides what happens. It is the only thing allowed to write application state, t
 the place every business rule lives — validation, sequencing, what a failure means, where to navigate next.
 
 ```ts
-class PayUseCase extends BaseUseCase {
+class PayUseCase extends BaseUseCase<PaymentRequest> {
   protected async runLogic(request: PaymentRequest) {
     this.getState().receipt = await paymentGateway.pay(request);
   }
@@ -842,6 +852,9 @@ Three components mounting at once, a click that fires twice, a retry racing the 
 in the component, because the de-duplication is in the library. Runs are keyed by the use case and its parameters, and
 the key is dropped when the run ends, so this is **de-duplication, not caching**: calling it again afterwards runs it
 again, as it should.
+
+There is nothing to configure. Parameters are compared by value — the same lease id, the same filter — except files,
+which are compared by identity: two uploads of different files are two runs, and the same file twice is one.
 
 A caller that joins a run already in flight is still a caller: if nobody is waiting on it, it announces when the run
 it joined completes. That matters when the run it joined was nested inside something else and therefore silent —
@@ -922,20 +935,13 @@ protected async runLogic(filter: RequestFilter) {
 Each presentation then reads its own entry, the two runs never touch the same place, and the order they finish in
 stops mattering.
 
-> [!WARNING]
-> **Do not put a** `Set` **or a** `Map` **in a filter.** The de-duplication key is `JSON.stringify(params)`,
-> and both stringify to `{}` — so `{ statuses: new Set(["open"]) }` and `{ statuses: new Set(["closed"]) }` are the
-> same key, the second screen joins the first run instead of making its own, and it renders data it never asked for.
-> Filters are where this bites, because a set of selected values is such a natural thing to pass. Use an array — and
-> sort it, so the same selection made in a different order is the same key.
-
 ## Progress, for work the user watches
 
 `useUseCase` returns a `progress` number alongside `isLoading`, and the use case is what moves it. A use case receives
 an optional reporter as its constructor argument and calls it:
 
 ```ts
-class CreateRequestUseCase extends BaseUseCase {
+class CreateRequestUseCase extends BaseUseCase<NewRequest> {
   private done = 0;
 
   protected async runLogic(request: NewRequest) {
@@ -995,7 +1001,7 @@ So give each step the slice of the bar it owns, and let it go on counting itself
 rest:
 
 ```ts
-class SubmitRequestUseCase extends BaseUseCase {
+class SubmitRequestUseCase extends BaseUseCase<RequestValues> {
   protected async runLogic(values: RequestValues) {
     await new ValidateRequestUseCase(this.share(0, 10)).execute(values);
     await new CreateRequestUseCase(this.share(10, 70)).execute(values);
@@ -1082,7 +1088,7 @@ longer aborts the rest — each `execute` came from a hook, and hooks swallow.
 Write the flow as a use case and let the screen call one thing:
 
 ```ts
-class PayRentUseCase extends BaseUseCase {
+class PayRentUseCase extends BaseUseCase<PaymentRequest> {
   protected async runLogic(request: PaymentRequest) {
     await new ValidateAccountUseCase().execute(request.accountId);
     await new GetQuoteUseCase().execute(request);
@@ -1150,7 +1156,7 @@ Sometimes a use case should start something and return — the screen goes back 
 when the work lands. That is `detach`:
 
 ```ts
-protected detach(UseCaseClass: UseCaseClass<T>, params?: unknown): void
+protected detach<TParams>(UseCaseClass: UseCaseClass<TState, TParams>, params: TParams): void
 ```
 
 It takes the **class**, not an instance — the library constructs it — and returns `void`. There is nothing to await,
@@ -1279,6 +1285,9 @@ protected async runLogic(edit: TenantEdit) {
 > while you are gone, your reference is left pointing at the object it replaced, and your writes go somewhere nothing
 > reads — no error, no event, no clue. Reach for `getState()` again after every `await` rather than holding what it
 > returned.
+>
+> The same goes for an object you put into state: once it is there, reach it through `getState()`. A write made
+> through a reference you kept is one the library never sees, so nothing is announced and no screen updates.
 
 Beyond that, the rest is sequencing, and it is fixed by sequencing: `await` your use cases, and key state by what it
 describes so two runs cannot land in the same place at all. [One run, not five](#one-run-not-five) is that argument in
@@ -1322,7 +1331,7 @@ interface AppState {
   tenants: readonly Tenant[]; // replaced wholesale
 }
 
-class AddTenantUseCase extends BaseUseCase {
+class AddTenantUseCase extends BaseUseCase<Tenant> {
   protected async runLogic(tenant: Tenant) {
     const state = this.getState();
 
@@ -1921,7 +1930,7 @@ An editing use case clears the codes belonging to the fields it changes, so an e
 it:
 
 ```ts
-class EditPaymentUseCase extends BaseUseCase {
+class EditPaymentUseCase extends BaseUseCase<Partial<PaymentValues>> {
   protected async runLogic(patch: Partial<PaymentValues>) {
     const form = this.getState().paymentForm;
     form.values = { ...form.values, ...patch };
@@ -2419,6 +2428,19 @@ functions.
 | `runInRequestScope(fn)`       | Runs a render with a scope belonging to that request. See [Server-side rendering](#server-side-rendering). |
 | `serializedStateScript()`     | The state that render produced, as a `<script>` the browser runs before it hydrates.                    |
 
+## Lint rules
+
+`@magicdoor/eslint-plugin-magic-use-case` checks the rules this document relies on: only a use case constructs another,
+presentations never run one, nobody catches what `execute` never throws, and nobody types a model as `DeepReadonly`.
+
+```js
+import magicUseCase from '@magicdoor/eslint-plugin-magic-use-case';
+
+export default [{ files: ['src/**/*.{ts,tsx}'], ...magicUseCase.configs.recommended }];
+```
+
+See [its README](packages/eslint-plugin/README.md) for each rule.
+
 ## What a use case can do
 
 The members of `UseCase` you write against. All are `protected` except `execute`; `runLogic` and `initializeState`
@@ -2427,7 +2449,7 @@ are abstract and yours to implement.
 | Member                                    | What it does                                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `constructor(onProgress?)`                | The only constructor argument: a `(percent: number) => void` reporter, which `useUseCase` supplies. See [Progress](#progress-for-work-the-user-watches). |
-| `execute(params?): Promise<void>`         | Runs `runLogic`, de-duplicated by class and `JSON.stringify(params)`. Rejects when `runLogic` throws. See [One run, not five](#one-run-not-five). |
+| `execute(params): Promise<void>`          | Runs `runLogic`, de-duplicated by class and parameters, compared by value. Rejects when `runLogic` throws. See [One run, not five](#one-run-not-five). |
 | `runLogic(params): Promise<void>`         | The whole of the use case. Abstract.                                                                                                 |
 | `initializeState(): Promise<TState>`      | Called once per scope, by whichever use case runs first. Abstract — put it on one base class. See [Bootstrapping](#bootstrapping).   |
 | `getState(): TState`                      | The live state, writable only while this use case is running. Call it again after every `await`. See [Application state](#4-application-state). |

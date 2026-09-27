@@ -8,7 +8,6 @@ concurrency: release-${{ github.ref }}
 
 permissions:
   contents: write
-  pull-requests: write
   id-token: write # required for npm provenance
 
 jobs:
@@ -26,8 +25,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
 
-      # The same gates a pull request passes. `changesets/action` publishes from
-      # this job, so nothing else stands between a red master and npm.
+      # The same gates a pull request passes. This job versions and publishes, so
+      # nothing else stands between a red master and npm.
       - run: npm run build
       - run: npm run type-check
       - run: npm run lint
@@ -36,13 +35,20 @@ jobs:
       # one exists: `attw` for how the types resolve, `publint` for the manifest.
       - run: npm run check-package
 
-      # Opens a "Version Packages" PR when changesets are pending; publishes to
-      # npm when that PR is merged.
-      - uses: changesets/action@v1
-        with:
-          publish: npm run release
-          version: npx changeset version
+      - name: Version
+        run: |
+          if [ -z "$(find .changeset -name '*.md')" ]; then exit 0; fi
+          npx changeset version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Version Packages"
+          git push origin HEAD:master
+
+      - name: Publish
+        run: |
+          npm run release
+          git push origin --tags
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true

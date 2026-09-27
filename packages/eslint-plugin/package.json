@@ -1,0 +1,61 @@
+{
+  "name": "@magicdoor/eslint-plugin-magic-use-case",
+  "version": "0.2.0",
+  "description": "ESLint rules for magic-use-case — keep use cases, presentations and the UI in their lanes.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "type-check": "tsc --project typecheckconfig.json",
+    "check-package": "attw --pack . --ignore-rules cjs-resolves-to-esm && publint --strict",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.0.0"
+  },
+  "dependencies": {
+    "@typescript-eslint/utils": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/rule-tester": "^8.70.0"
+  },
+  "keywords": [
+    "eslint",
+    "eslintplugin",
+    "use-case",
+    "clean-architecture",
+    "presenter"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MagicDoorInc/magic-use-case.git",
+    "directory": "packages/eslint-plugin"
+  },
+  "homepage": "https://github.com/MagicDoorInc/magic-use-case#readme",
+  "bugs": {
+    "url": "https://github.com/MagicDoorInc/magic-use-case/issues"
+  },
+  "author": "Norbert Nemes",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

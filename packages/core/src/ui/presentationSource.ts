@@ -1,5 +1,7 @@
 import type { AppScope } from '../usecase/appScope';
 import { deepReadonly } from '../usecase/deepReadonly';
+import { detachFromState } from './detachFromState';
+import { affects, trackReads, type Dependencies } from '../usecase/dependencies';
 import type { Presentation } from './Presentation';
 
 export interface PresentationSource {
@@ -7,6 +9,7 @@ export interface PresentationSource {
   listeners: Set<(model: unknown) => void>;
   handler: (state: unknown) => void;
   presenters: number;
+  dependencies?: Dependencies;
 }
 
 /**
@@ -39,12 +42,17 @@ export function acquireSource<TState, TModel extends object>(
       // having to guard against a value its type says it never receives.
       if (state === undefined) {
         source.model = undefined;
+        source.dependencies = undefined;
       } else {
+        const changes = scope.announcedChanges;
+        if (changes && source.dependencies && !affects(changes, source.dependencies)) return;
         try {
           // Kept raw: an adapter's store has to own a mutable object to
           // reconcile into. Making the model unwritable is the adapter's job,
           // at the boundary where it hands the model to a component.
-          source.model = presentation(state as TState);
+          const { result, dependencies } = trackReads(() => detachFromState(presentation(state as TState)));
+          source.model = result;
+          source.dependencies = dependencies;
         } catch (error) {
           // A presentation that throws is a bug in one screen's mapping, and
           // it is reported as one. It must not fail the construction that is
@@ -54,6 +62,7 @@ export function acquireSource<TState, TModel extends object>(
           // empty state rather than keep painting a stale one.
           console.error('[magic-use-case] A presentation threw; its model is left empty.', error);
           source.model = undefined;
+          source.dependencies = undefined;
         }
       }
       source.listeners.forEach((listener) => listener(source.model));

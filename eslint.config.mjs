@@ -8,7 +8,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['packages/*/src/**/*.{ts,tsx}'],
+    files: ['packages/*/{src,test}/**/*.{ts,tsx}'],
     plugins: { import: importPlugin, 'unused-imports': unusedImports },
     rules: {
       'unused-imports/no-unused-imports': 'error',
@@ -20,7 +20,7 @@ export default tseslint.config(
       // Core is bundled in at build time and has no supported API surface.
       'import/no-internal-modules': [
         'error',
-        { allow: ['solid-js/*', 'react/*', 'react-dom/*', '**/src/**'] },
+        { allow: ['solid-js/*', 'react/*', 'react-dom/*', '**/src/**', '**/test/**'] },
       ],
     },
   },

@@ -1,5 +1,6 @@
 import { ConcreteEventEmitter, type EventEmitter, type EventHandler } from './eventEmitter';
 import type { PresentationSource } from '../ui/presentationSource';
+import { noChanges, type Changes } from './dependencies';
 
 declare const scopeBrand: unique symbol;
 
@@ -36,6 +37,9 @@ export interface AppScope extends ScopeHandle {
   sources: Map<object, PresentationSource>;
   /** Depth of running use cases, which is what makes state writable. */
   openMutationWindows: number;
+  writes: number;
+  changes: Changes;
+  announcedChanges?: Changes;
 }
 
 export function createScope(initialState?: unknown): ScopeHandle {
@@ -46,6 +50,8 @@ export function createScope(initialState?: unknown): ScopeHandle {
     emitter: new ConcreteEventEmitter(),
     sources: new Map(),
     openMutationWindows: 0,
+    writes: 0,
+    changes: noChanges(),
   };
   return scope;
 }

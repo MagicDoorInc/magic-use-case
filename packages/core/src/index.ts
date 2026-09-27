@@ -1,6 +1,6 @@
 export { onError, onNavigation } from './usecase/appScope';
 export { createUseCase, UseCase } from './usecase/useCase';
-export type { UseCaseClass } from './usecase/useCase';
+export type { UseCaseArgs, UseCaseClass } from './usecase/useCase';
 export { Presenter } from './ui/Presenter';
 export { currentModelFor } from './ui/currentModel';
 export type { Presentation } from './ui/Presentation';

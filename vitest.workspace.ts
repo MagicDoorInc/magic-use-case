@@ -11,7 +11,10 @@ const coreSource = {
 
 export default defineWorkspace([
   {
-    test: { name: 'core', include: ['packages/core/src/**/*.test.ts'], pool: 'threads', isolate: false },
+    test: { name: 'eslint-plugin', include: ['packages/eslint-plugin/test/**/*.test.ts'], pool: 'threads' },
+  },
+  {
+    test: { name: 'core', include: ['packages/core/test/**/*.test.ts'], pool: 'threads', isolate: false },
   },
   {
     resolve: { alias: coreSource },
@@ -20,7 +23,7 @@ export default defineWorkspace([
       name: 'react',
       // A DOM is set up per file that asks for it, rather than for the whole project.
       environment: 'node',
-      include: ['packages/react/src/**/*.test.{ts,tsx}'],
+      include: ['packages/react/test/**/*.test.{ts,tsx}'],
       pool: 'threads',
       isolate: false,
     },
@@ -40,7 +43,7 @@ export default defineWorkspace([
       // Solid's client transform over its SSR one, and the server build compiles
       // components differently enough that the tests would stop covering them.
       environment: 'jsdom',
-      include: ['packages/solid/src/**/*.test.{ts,tsx}'],
+      include: ['packages/solid/test/**/*.test.{ts,tsx}'],
       pool: 'threads',
       isolate: false,
       server: { deps: { inline: [/solid-js/, /@solidjs\/testing-library/] } },

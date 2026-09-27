@@ -1,4 +1,5 @@
 import { currentScope, type AppScope } from './appScope';
+import { recordChange, recordChangeOfEverythingUnder, type WHOLE } from './dependencies';
 
 /**
  * Application state may only be mutated from inside a running use case.
@@ -48,4 +49,16 @@ export function assertMutationWindowOpen(operation: string): void {
   throw new Error(
     `[magic-use-case] ${operation} is only allowed inside a running use case.`,
   );
+}
+
+export function recordWrite(target: object, prop: PropertyKey | typeof WHOLE): void {
+  const scope = currentScope();
+  scope.writes += 1;
+  recordChange(scope.changes, target, prop);
+}
+
+export function recordWriteOfEverythingUnder(target: object): void {
+  const scope = currentScope();
+  scope.writes += 1;
+  recordChangeOfEverythingUnder(scope.changes, target);
 }

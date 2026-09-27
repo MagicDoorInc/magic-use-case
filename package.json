@@ -18,7 +18,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "lint": "eslint packages/*/src",
+    "lint": "eslint packages/*/src packages/*/test",
     "check-package": "npm run check-package --workspaces --if-present",
     "type-check": "npm run type-check --workspaces --if-present",
     "changeset": "changeset",

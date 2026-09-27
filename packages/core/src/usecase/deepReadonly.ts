@@ -1,4 +1,8 @@
-import { isMutationWindowOpen } from './mutationWindow';
+import { isMutationWindowOpen, recordWrite, recordWriteOfEverythingUnder } from './mutationWindow';
+import { KEYS, WHOLE, recordRead, recordReadOfEverythingUnder } from './dependencies';
+import { RAW, toRaw } from './raw';
+
+export { toRaw };
 
 const mutatingMapMethods = new Set(['set', 'delete', 'clear']);
 const mutatingSetMethods = new Set(['add', 'delete', 'clear']);
@@ -30,6 +34,9 @@ interface Policy {
   /** Prefixes the collection name in messages, e.g. "readonly Array". */
   label: string;
   allows(): boolean;
+  tracksReads: boolean;
+  wrote(target: object, prop: PropertyKey | typeof WHOLE): void;
+  usedWhole(target: object): void;
   reject(action: string): never;
 }
 
@@ -38,6 +45,9 @@ const READONLY: Policy = {
   cache: new WeakMap<object, object>(),
   label: 'readonly ',
   allows: () => false,
+  tracksReads: true,
+  wrote: () => undefined,
+  usedWhole: recordReadOfEverythingUnder,
   reject(action) {
     throw new Error(`Cannot ${action} on readonly object`);
   },
@@ -48,6 +58,9 @@ const USE_CASE: Policy = {
   cache: new WeakMap<object, object>(),
   label: '',
   allows: isMutationWindowOpen,
+  tracksReads: false,
+  wrote: recordWrite,
+  usedWhole: recordWriteOfEverythingUnder,
   reject(action) {
     throw new Error(
       `[magic-use-case] Cannot ${action} outside a use case.\n\n` +
@@ -83,6 +96,82 @@ export function isBlob(value: object): boolean {
   return tag === '[object Blob]' || tag === '[object File]';
 }
 
+function isAccessor(target: object, prop: PropertyKey): boolean {
+  for (let object: object | null = target; object; object = Object.getPrototypeOf(object) as object | null) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, prop);
+    if (descriptor) return descriptor.get !== undefined || descriptor.set !== undefined;
+  }
+  return false;
+}
+
+function read(policy: Policy, target: object, prop: PropertyKey | typeof WHOLE) {
+  if (!policy.tracksReads) return;
+  if (prop !== WHOLE && !Array.isArray(target) && isAccessor(target, prop)) {
+    policy.usedWhole(target);
+    return;
+  }
+  recordRead(target, prop);
+}
+
+function refused(target: object, action: string): never {
+  const reason = Object.isFrozen(target)
+    ? 'the object is frozen. Replace it in state instead of changing it'
+    : !Object.isExtensible(target)
+      ? 'the object is sealed. Replace it in state instead of adding to it'
+      : 'the property is read-only';
+  throw new Error(`[magic-use-case] Cannot ${action}: ${reason}.`);
+}
+
+function collectionMutator(target: object, name: string, method: (...args: unknown[]) => unknown, policy: Policy) {
+  return (...args: unknown[]) => {
+    if (Array.isArray(target) && Object.isFrozen(target)) refused(target, `call .${name}() on an array`);
+    policy.wrote(target, WHOLE);
+    return method.apply(target, args);
+  };
+}
+
+function method(target: object, fn: (...args: unknown[]) => unknown, policy: Policy) {
+  return (...args: unknown[]) => {
+    policy.usedWhole(target);
+    return fn.apply(target, args);
+  };
+}
+
+function wroteKey(target: object, prop: string | symbol, policy: Policy, keysChanged: boolean) {
+  if (Array.isArray(target)) {
+    policy.wrote(target, WHOLE);
+    return;
+  }
+  policy.wrote(target, prop);
+  if (keysChanged) policy.wrote(target, KEYS);
+}
+
+function setRecorded(target: object, prop: string | symbol, value: unknown, policy: Policy): boolean {
+  if (isAccessor(target, prop)) {
+    if (!Reflect.set(target, prop, value)) refused(target, `set '${String(prop)}'`);
+    policy.usedWhole(target);
+    return true;
+  }
+  const own = Object.getOwnPropertyDescriptor(target, prop);
+  const unchanged = own !== undefined && Object.is(own.value, value);
+  if (!Reflect.set(target, prop, value)) refused(target, `set '${String(prop)}'`);
+  if (!unchanged) wroteKey(target, prop, policy, own === undefined);
+  return true;
+}
+
+function deleteRecorded(target: object, prop: string | symbol, policy: Policy): boolean {
+  const existed = Object.prototype.hasOwnProperty.call(target, prop);
+  if (!Reflect.deleteProperty(target, prop)) refused(target, `delete '${String(prop)}'`);
+  if (existed) wroteKey(target, prop, policy, true);
+  return true;
+}
+
+function defineRecorded(target: object, prop: string | symbol, attributes: PropertyDescriptor, policy: Policy): boolean {
+  if (!Reflect.defineProperty(target, prop, attributes)) refused(target, `define '${String(prop)}'`);
+  wroteKey(target, prop, policy, true);
+  return true;
+}
+
 function wrap(value: unknown, policy: Policy): unknown {
   return isObject(value) ? proxyFor(value, policy) : value;
 }
@@ -90,12 +179,14 @@ function wrap(value: unknown, policy: Policy): unknown {
 function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unknown, unknown> {
   return new Proxy(target, {
     get(target, prop, receiver) {
+      if (prop === RAW) return target;
       if (prop === policy.marker) return true;
+      read(policy, target, WHOLE);
 
       if (typeof prop === 'string' && mutatingMapMethods.has(prop)) {
         if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Map`);
         const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
-        return method.bind(target);
+        return collectionMutator(target, prop, method, policy);
       }
 
       if (prop === 'get') {
@@ -123,15 +214,15 @@ function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unkn
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
-      return Reflect.set(target, prop, value);
+      return setRecorded(target, prop, value, policy);
     },
     deleteProperty(target, prop) {
       if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
-      return Reflect.deleteProperty(target, prop);
+      return deleteRecorded(target, prop, policy);
     },
     defineProperty(target, prop, attributes) {
       if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
-      return Reflect.defineProperty(target, prop, attributes);
+      return defineRecorded(target, prop, attributes, policy);
     },
   });
 }
@@ -139,12 +230,14 @@ function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unkn
 function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
   return new Proxy(target, {
     get(target, prop, receiver) {
+      if (prop === RAW) return target;
       if (prop === policy.marker) return true;
+      read(policy, target, WHOLE);
 
       if (typeof prop === 'string' && mutatingSetMethods.has(prop)) {
         if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Set`);
         const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
-        return method.bind(target);
+        return collectionMutator(target, prop, method, policy);
       }
 
       if (iteratorKeys.has(prop)) {
@@ -164,28 +257,29 @@ function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
-      return Reflect.set(target, prop, value);
+      return setRecorded(target, prop, value, policy);
     },
     deleteProperty(target, prop) {
       if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
-      return Reflect.deleteProperty(target, prop);
+      return deleteRecorded(target, prop, policy);
     },
     defineProperty(target, prop, attributes) {
       if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
-      return Reflect.defineProperty(target, prop, attributes);
+      return defineRecorded(target, prop, attributes, policy);
     },
   });
 }
 
 function createObjectProxy(target: object, policy: Policy): object {
   return new Proxy(target, {
-    get(target, prop) {
+    get(target, prop, receiver) {
+      if (prop === RAW) return target;
       if (prop === policy.marker) return true;
 
       if (Array.isArray(target) && typeof prop === 'string' && mutatingArrayMethods.has(prop)) {
         if (!policy.allows()) return () => policy.reject(`call .${prop}() on ${policy.label}Array`);
         const method = Reflect.get(target, prop, target) as (...args: unknown[]) => unknown;
-        return method.bind(target);
+        return collectionMutator(target, prop, method, policy);
       }
 
       // Read as the target, not as the proxy. A native accessor — a `File`'s
@@ -193,21 +287,39 @@ function createObjectProxy(target: object, policy: Policy): object {
       // belongs to, and a method handed out unbound would be called with the
       // proxy as `this` and refuse the same way.
       const value = Reflect.get(target, prop, target);
-      if (typeof value === 'function') return prop === 'constructor' ? value : value.bind(target);
-      if (!isObject(value) || mustReturnRaw(target, prop)) return value;
+      read(policy, target, prop);
+      if (mustReturnRaw(target, prop)) return value;
+      if (typeof value === 'function') {
+        if (prop === 'constructor') return value;
+        if (Array.isArray(target)) return value.bind(policy.tracksReads ? receiver : target);
+        return method(target, value as (...args: unknown[]) => unknown, policy);
+      }
+      if (!isObject(value)) return value;
       return proxyFor(value, policy);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
-      return Reflect.set(target, prop, value);
+      return setRecorded(target, prop, value, policy);
     },
     deleteProperty(target, prop) {
       if (!policy.allows()) policy.reject(`delete property '${String(prop)}'`);
-      return Reflect.deleteProperty(target, prop);
+      return deleteRecorded(target, prop, policy);
     },
     defineProperty(target, prop, attributes) {
       if (!policy.allows()) policy.reject(`define property '${String(prop)}'`);
-      return Reflect.defineProperty(target, prop, attributes);
+      return defineRecorded(target, prop, attributes, policy);
+    },
+    has(target, prop) {
+      read(policy, target, prop);
+      return Reflect.has(target, prop);
+    },
+    ownKeys(target) {
+      read(policy, target, Array.isArray(target) ? WHOLE : KEYS);
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      read(policy, target, prop);
+      return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
 }

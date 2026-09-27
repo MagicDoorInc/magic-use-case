@@ -1,5 +1,6 @@
 import { currentScope } from '../usecase/appScope';
 import { deepReadonly } from '../usecase/deepReadonly';
+import { detachFromState } from './detachFromState';
 import type { Presentation } from './Presentation';
 
 /**
@@ -21,7 +22,7 @@ export function currentModelFor<TState, TModel extends object>(
   }
 
   try {
-    return presentation(deepReadonly(state as object) as TState);
+    return detachFromState(presentation(deepReadonly(state as object) as TState));
   } catch (error) {
     // Matching what a subscribed presentation does when it throws: the screen
     // shows its empty state, and the bug is reported rather than thrown into
