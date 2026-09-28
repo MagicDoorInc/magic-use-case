@@ -22,7 +22,7 @@ export function resolveServerScope(): ScopeHandle {
 
   if (!event) {
     throw new Error(
-      '[magic-use-case] No request scope is available.\n\n' +
+      'No request scope is available.\n\n' +
         'On a server, application state belongs to the request being served, so that ' +
         'concurrent requests never share it. This ran on a server but outside a request, ' +
         'so there is no request to resolve a scope from — and falling back to a shared ' +

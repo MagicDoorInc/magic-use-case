@@ -35,7 +35,7 @@ function serializedOrExplained(state: unknown): string {
     return serialize(state);
   } catch (error) {
     throw new Error(
-      '[magic-use-case] Application state cannot be handed to the browser.\n\n' +
+      'Application state cannot be handed to the browser.\n\n' +
         'Everything in it has to be data — objects, arrays, sets, maps, dates and ' +
         'primitives. A class instance cannot cross, because its prototype cannot: ' +
         'the browser would receive the fields and none of the behavior.\n\n' +

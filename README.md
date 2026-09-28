@@ -532,7 +532,7 @@ made into a boundary:
 | Where the fetch goes           | a thunk, a listener, or RTK Query — chosen per team         | any store action, or any component               | a gateway, called from a use case                                                 |
 | Where the decision goes        | the reducer, by recommendation; the thunk, often            | anywhere                                         | the use case, and nowhere else                                                    |
 | Who may write state            | a reducer, in response to a dispatched action               | anything that can reach `set` or `setState()`    | a running use case; a write anywhere else throws at that line                     |
-| What the screen renders        | selectors, memoized with `reselect`                         | selectors, `useShallow` for several fields       | a presenter, which runs one pure presentation once per state change for every screen and hands the model through a reconciled store, so only what changed reaches the renderer |
+| What the screen renders        | selectors, memoized with `reselect`                         | selectors, `useShallow` for several fields       | a presenter, which runs one pure presentation for every screen, only when a change touched what it read, and hands the model through a reconciled store, so only what changed reaches the renderer |
 | Changing one nested field      | an action and a reducer case (Immer inside RTK)             | one `set`                                        | one assignment inside `runLogic`                                                  |
 | A flow of several steps        | a thunk, a saga, or listener middleware                     | an async action                                  | a higher-order use case, with one `isLoading` for the whole flow                  |
 | Concurrent runs of the same op | your problem, unless it is an RTK Query query               | your problem                                     | de-duplicated by parameters; joiners share the run                                |
@@ -617,8 +617,8 @@ const presentPayment: Presentation<AppState, PresentablePayment> = (state) => ({
 
 Two words, and the document uses both, so here is the difference once. A **presentation** is the function above:
 yours, pure, and testable on its own — call it with a state, assert the model. A **presenter** is the library's object
-that holds a presentation: it subscribes to state changes, reruns the presentation on each one, and hands the model to
-whoever is listening. `usePresenter(presentPayment)` makes a presenter for the presentation you pass, and that is
+that holds a presentation: it subscribes to state changes, reruns the presentation on each one that touched what it
+read, and hands the model to whoever is listening. `usePresenter(presentPayment)` makes a presenter for the presentation you pass, and that is
 the only way you meet one. So you write presentations, the library runs them through presenters, and the
 component reads a model. The tests are on the presentation; a presenter is plumbing, with nothing in it to assert.
 
@@ -626,8 +626,8 @@ What follows is how one behaves: the work shared between screens, how little of 
 models compose, and why the one you are handed is readonly.
 
 Ten screens rendering the same presentation do not run it ten times. Presenters given the same presentation share a
-single run of it: the model is built once per state change and handed to all of them, and the last presenter to be
-destroyed releases it.
+single run of it: the model is built at most once per state change and handed to all of them, and the last presenter
+to be destroyed releases it.
 
 Sharing is keyed on the **identity** of the function you pass — the object itself, not its name. That is deliberate: a
 minifier renames `presentTenants` to `e`, and two unrelated presentations with identical bodies can end up with the
@@ -672,13 +672,13 @@ inline version is the right answer — give it a name, export it, and pass the n
 > // ...then render from admin or user, branching as often as you like
 > ```
 >
-> Nothing is wasted by holding two or three. Each model is built once per state change and shared with every other
+> Nothing is wasted by holding two or three. Each model is built at most once per state change and shared with every other
 > screen reading the same presentation, so a second presenter adds a subscription, not a second run.
 
 ## A model is rebuilt, but the screen is not
 
-A presentation runs again on every state change and returns a whole new object. That sounds expensive, and it would be
-if the object went straight to the renderer. It does not: `usePresenter` puts it through a **reconciled store**, which
+A presentation runs again whenever a change touches something it read, and returns a whole new object. That sounds
+expensive, and it would be if the object went straight to the renderer. It does not: `usePresenter` puts it through a **reconciled store**, which
 compares the new model against the one on screen and keeps the parts that did not change.
 
 What that means in each adapter:
@@ -695,7 +695,9 @@ So there are five separate reasons the UI does less work than the naive reading 
 1. **A run announces only if nobody is waiting on it** — a flow of ten nested steps produces one announcement, not
    ten.
 2. **A run announces only if it changed something.** One that looked and found nothing to do — a scroll handler
-   checking whether the next page is needed — costs no presentation anything.
+   checking whether the next page is needed — costs no presentation anything. Loading the initial state and
+   `resetAppState()` always count as changes, and so does calling a method on an object in state, since the library
+   cannot see what the method did.
 3. **A presentation re-runs only if something it read changed.** The library records what each presentation reads
    and what each run writes, so a keystroke in a form re-runs the form's presentation and leaves the chat list alone.
    A method called on an object in state — or a getter or setter — counts as reading or writing all of that object.
@@ -765,10 +767,12 @@ formatted at the call site.
 > is what shares work between screens, keyed on the identity of the function you hand it; a presentation calling
 > another is an ordinary call, computed as part of the outer run.
 
-A child component's prop type is the nested model wrapped in `DeepReadonly`, since that is what it receives:
+A child component's prop is typed by the view model it renders. Declare a view model's collections `readonly`
+(`readonly PresentableLease[]`, `ReadonlyMap`), and the model a component receives, readonly all the way down, fits it
+as it is — no copying it into a mutable array to satisfy a prop:
 
 ```tsx
-function LeaseCard({ lease }: { lease: DeepReadonly<PresentableLease> }) { /* ... */ }
+function LeaseCard({ lease }: { lease: PresentableLease }) { /* ... */ }
 ```
 
 ## The model is readonly
@@ -782,6 +786,9 @@ proxy at runtime.
 and `clear` throw. Arrays become `readonly` arrays. Methods pass through untouched, so a model may carry an object
 with behavior and still be callable; the object is recognizable too, `constructor` and `instanceof` answering the way
 they would without the proxy. Only writes are refused.
+
+Never name `DeepReadonly` in your own code — `@magicdoor/eslint-plugin` reports it. Type a prop by its view model, as
+above, or let it be inferred.
 
 ---
 
@@ -841,9 +848,9 @@ callers join the run in flight and get its outcome — including its failure:
 
 ```ts
 await Promise.all([
-  new LoadTenantsUseCase().execute("lease-1"),
-  new LoadTenantsUseCase().execute("lease-1"),
-  new LoadTenantsUseCase().execute("lease-1"),
+  new LoadLeaseUseCase().execute("lease-1"),
+  new LoadLeaseUseCase().execute("lease-1"),
+  new LoadLeaseUseCase().execute("lease-1"),
 ]);
 // one execution, one request, three callers satisfied
 ```
@@ -853,8 +860,9 @@ in the component, because the de-duplication is in the library. Runs are keyed b
 the key is dropped when the run ends, so this is **de-duplication, not caching**: calling it again afterwards runs it
 again, as it should.
 
-There is nothing to configure. Parameters are compared by value — the same lease id, the same filter — except files,
-which are compared by identity: two uploads of different files are two runs, and the same file twice is one.
+There is nothing to configure. Parameters are compared by value — the same lease id, the same filter — including the
+contents of a `Map` or `Set`. Files and blobs are the exception, compared by identity: two uploads of different files
+are two runs, and the same file twice is one.
 
 A caller that joins a run already in flight is still a caller: if nobody is waiting on it, it announces when the run
 it joined completes. That matters when the run it joined was nested inside something else and therefore silent —
@@ -988,7 +996,7 @@ inner steps to drive the bar passes its own reporter down:
 class SubmitRequestUseCase extends BaseUseCase {
   protected async runLogic() {
     // ...
-    await new CreateRequestUseCase(this.onProgress).execute(values);
+    await new CreateRequestUseCase(this.onProgress).execute(this.getState().requestForm.values);
   }
 }
 ```
@@ -1001,8 +1009,8 @@ So give each step the slice of the bar it owns, and let it go on counting itself
 rest:
 
 ```ts
-class SubmitRequestUseCase extends BaseUseCase<RequestValues> {
-  protected async runLogic(values: RequestValues) {
+class SubmitRequestUseCase extends BaseUseCase<NewRequest> {
+  protected async runLogic(values: NewRequest) {
     await new ValidateRequestUseCase(this.share(0, 10)).execute(values);
     await new CreateRequestUseCase(this.share(10, 70)).execute(values);
     await new AttachFilesUseCase(this.share(70, 95)).execute(values);
@@ -1133,7 +1141,7 @@ for it to stay quiet on behalf of. It announces its own work when it lands, sepa
 ```ts
 class SubmitRequestUseCase extends BaseUseCase {
   protected async runLogic() {
-    this.detach(CreateRequestUseCase, values); // announces when it finishes, later
+    this.detach(CreateRequestUseCase, this.getState().requestForm.values); // announces when it finishes, later
     this.getState().requestForm = emptyRequestForm();
   }
 } // ← announces the cleared form, now
@@ -1156,11 +1164,12 @@ Sometimes a use case should start something and return — the screen goes back 
 when the work lands. That is `detach`:
 
 ```ts
-protected detach<TParams>(UseCaseClass: UseCaseClass<TState, TParams>, params: TParams): void
+protected detach<TParams>(UseCaseClass: UseCaseClass<TState, TParams>, ...[params]: UseCaseArgs<TParams>): void
 ```
 
 It takes the **class**, not an instance — the library constructs it — and returns `void`. There is nothing to await,
-which is the point.
+which is the point. The params are checked against the use case being detached, and one that takes none is detached
+with no second argument: `this.detach(RefreshChatsUseCase)`.
 
 ```ts
 class SubmitRequestUseCase extends BaseUseCase {
@@ -1211,8 +1220,8 @@ flight rather than starting a second.
 
 ### Testing it
 
-The work finishes after `execute()` resolves, so a test waits for the result rather than for a clock — see [Work that
-outlives the call](#work-that-outlives-the-call).
+The work finishes after `execute()` resolves, so a test lets it settle on a fake clock before asserting — see [Work
+that outlives the call](#work-that-outlives-the-call).
 
 ---
 
@@ -1302,10 +1311,10 @@ runs really do write across their awaits. For most applications it is effort wit
 is to mutate.
 
 `getState()` returns a deep proxy that accepts writes only while a use case is running. Anywhere else — a component, a
-presentation, a module holding a reference — the write throws:
+module holding a reference, an SDK callback — the write throws:
 
 ```
-[magic-use-case] Cannot call .push() on Array outside a use case.
+Cannot call .push() on Array outside a use case.
 ```
 
 This exists because a write made outside a use case emits no state-change event, so presentations keep rendering stale
@@ -1313,7 +1322,8 @@ data. That is a silent desync; the guard turns it into an error at the offending
 
 Presentations are covered by a second, stricter rule: one receives a fully readonly view, and anything it passes
 through to the view model stays readonly. That view never accepts a write, independently of whether a use case happens
-to be running — so a presentation cannot write state even when a nested use case has left the mutation window open.
+to be running — so a presentation cannot write state even when a nested use case has left the mutation window open. A
+write there throws `Cannot set property 'status' on readonly object`, as does a component writing to its model.
 
 A presentation is only ever called with state. `resetAppState()` empties every model directly, so a presentation never
 has to guard against the absence of the state its signature promises. One that throws anyway is reported to the
@@ -1341,11 +1351,13 @@ class AddTenantUseCase extends BaseUseCase<Tenant> {
 }
 ```
 
-The only rule is the one above: the write happens inside a use case.
+The only rule is the one above: the write happens inside a use case. A frozen branch is replaced, never changed: a
+`push` onto `tenants` above throws `Cannot call .push() on an array: the object is frozen. Replace it in state instead of
+changing it.`
 
-The two styles differ in how presentations detect change. An in-place mutation keeps the branch's identity, so a
-presentation comparing references sees nothing and must diff structurally — which is what the reconciled store does. A
-replacement yields a new reference, so reference comparison is enough.
+Both styles reach the screen the same way. The library sees the write — an assignment, a `push`, a replacement — and
+re-runs the presentations that read what it touched; the reconciled store then keeps whatever of the model did not
+change. Neither style needs you to compare anything.
 
 The root object itself stays stable either way: it is adopted once from `initializeState()`, and there is no API to
 swap it wholesale.
@@ -1374,8 +1386,8 @@ class LogOutUseCase extends BaseUseCase {
 ```
 
 It clears application state, the event bus's retained copy, the in-flight deduplication map, and any bootstrap still
-in flight — all four, since leaving one behind resurrects the old state. Presentations are rerun so the UI clears, and
-the next `execute()` bootstraps through `initializeState()` again.
+in flight — all four, since leaving one behind resurrects the old state. Every model empties so the UI clears, and the
+next `execute()` bootstraps through `initializeState()` again.
 
 `protected` is a compile-time boundary, so JavaScript can still reach the method. Calling it outside a running use
 case throws, which is the same mutation window that governs every other write.
@@ -1392,7 +1404,8 @@ original.tenants.push(tenant); // legal, but changes nothing
 ```
 
 `getState()` is the only way to reach live state. The clone preserves prototypes, so a class works if you want one:
-`instanceof` holds and methods still work.
+`instanceof` holds and methods still work. It preserves freezing too: a frozen or sealed object, array, `Map` or `Set`
+is just as frozen or sealed in live state.
 
 > [!WARNING]
 > **A class rules out handing state to the browser.** Prototypes cannot be serialized, so a server render
@@ -1745,8 +1758,16 @@ Realtime clients push. The callback is an event arriving from outside, and it is
 — by running a use case:
 
 ```ts
-await signalRGateway.onMessage(() => void new LoadMessagesUseCase().execute());
+class SubscribeToMessagesUseCase extends BaseUseCase {
+  protected async runLogic() {
+    await signalRGateway.onMessage(() => this.detach(LoadMessagesUseCase));
+  }
+}
 ```
+
+Subscribe from a use case and detach the work each message starts. Nobody is waiting on a push, and a detached run is
+the one that knows it: it announces what it loaded, and a failure reaches `ErrorHandler`. A use case constructed with
+`new` in the callback would count as nested — it would announce nothing, and its failure would go nowhere.
 
 The callback must not write state. It has no mutation window, so the write would throw — which is the guard doing its
 job, telling you the handler belongs in a use case.
@@ -2141,13 +2162,17 @@ it("sends a signed-out tenant to the sign-in screen", async () => {
   givenAppState();
   const screen = givenTheScreenIsListening();
 
-  await new InitializeAppUseCase().execute({ host: "tenants.example.com" });
+  await new InitializeAppUseCase().execute();
 
   expect(screen.navigatedTo).toEqual(["/auth/signin"]);
 });
 ```
 
 Call it **after** `givenAppState()`: the subscriptions belong to the scope that call installs.
+
+A use case constructed with `new` in a test has a caller — the test — so its failure is the test's to see: `execute()`
+rejects, and nothing reaches `onError`. Assert the rejection there; `errorsRaised` is for failures that no caller was
+waiting on, such as a detached run's.
 
 ## Presentations are pure functions
 
@@ -2172,15 +2197,20 @@ optional data, each branch of a label.
 
 ## Work that outlives the call
 
-A `detach`ed run finishes after its starter returns, so wait for the result rather than for a timer:
+A `detach`ed run finishes after its starter returns. Run the test on a fake clock and advance it by nothing: that lets
+everything already under way — the detached run, the answer your mocked network gives it — settle before you assert.
 
 ```ts
-await new SubmitRequestUseCase().execute(); // returns immediately
+vi.useFakeTimers();
 
-await vi.waitFor(() => expect(appState.requestsByStatus.open).toHaveLength(1));
+await new SubmitRequestUseCase().execute(); // returns immediately
+await vi.advanceTimersByTimeAsync(0);
+
+expect(appState.requestsByStatus.open).toEqual([expectedRequest]);
 ```
 
-A fixed `setTimeout` is a guess about scheduling, and guesses fail on a loaded CI machine.
+Don't poll with `vi.waitFor` or sleep with a fixed `setTimeout`: both are guesses about scheduling, slow when they are
+right and flaky on a loaded CI machine. `@magicdoor/eslint-plugin` reports `vi.waitFor`.
 
 ## Timers
 
@@ -2204,14 +2234,17 @@ property of talking to that service rather than of any screen.
 **Never in a use case.** A use case decides _what_ happens; when it happens is someone else's business. Keeping it
 that way is what lets most of the suite run without a clock at all.
 
-**Two different problems in tests, two different tools.** Confusing them is where flaky suites come from:
+**One tool in tests: the clock.** Put it under the test's control, and advance it by nothing to let work already under
+way settle, or by the interval to live through a wait without spending it:
 
 ```ts
-// waiting for something to finish: poll the condition
-await vi.waitFor(() => expect(appState.requestsByStatus.open).toHaveLength(1));
+vi.useFakeTimers();
+
+// waiting for something to finish: let what is already under way settle
+await new SubmitRequestUseCase().execute();
+await vi.advanceTimersByTimeAsync(0);
 
 // the code itself waits: control the clock, do not live through it
-vi.useFakeTimers();
 const ready = gateway.pollUntilReady(); // internally waits 30s between attempts
 await vi.advanceTimersByTimeAsync(30_000);
 await ready;
@@ -2260,8 +2293,8 @@ one of three things:
 build automatically, so `renderToString` works with no configuration.
 
 Everything that makes up a running application lives in one scope: state itself, the bootstrap and de-duplication
-bookkeeping, the mutation window, the depth of attached runs, the event bus, and the model built for each
-presentation. A browser resolves one scope for the life of the page, which is exactly right where there is one process
+bookkeeping, the mutation window, the record of what has been written since the last announcement, the event bus, and
+the model built for each presentation. A browser resolves one scope for the life of the page, which is exactly right where there is one process
 per user. A server process serves many concurrent requests, and sharing any one of those would serve one user another
 user's data.
 
@@ -2379,7 +2412,7 @@ outside a request throws rather than quietly falling back to a shared scope, bec
 this exists to prevent:
 
 ```
-Error: [magic-use-case] No request scope is available.
+Error: No request scope is available.
 ```
 
 For React that means the render has to be inside `runInRequestScope`. For Solid there is nothing to open — the
@@ -2407,10 +2440,10 @@ functions.
 
 | Export                         | Kind      | What it is                                                                                                                                          |
 | ------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UseCase<TState>`              | class     | Base class for your application logic. Extend it once per app to supply `initializeState()`, then extend that. See [Use cases](#3-use-cases).       |
+| `UseCase<TState, TParams = void>` | class  | Base class for your application logic. Extend it once per app as `BaseUseCase<TParams = void>` to supply `initializeState()`, then extend that with each use case's params type. See [Use cases](#3-use-cases). |
 | `Presentation<TState, TModel>` | type      | `(state: TState) => TModel \| undefined` — a pure function from state to a model. See [Presentations](#2-presentations).                            |
 | `DeepReadonly<T>`              | type      | A model as the screen sees it: `readonly` arrays, `ReadonlyMap`/`ReadonlySet`, methods untouched. See [The model is readonly](#the-model-is-readonly). |
-| `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params?), isLoading, progress }` for the run the component starts; `execute` resolves to whether it succeeded. See [Components](#1-components).                  |
+| `useUseCase(UseCaseClass)`     | hook      | Returns `{ execute(params), isLoading, progress }` for the run the component starts — `execute` takes the use case's params, and nothing when it declares none; `execute` resolves to whether it succeeded. See [Components](#1-components).                  |
 | `usePresenter(presentation)`   | hook      | Returns `{ model }` — `DeepReadonly<TModel>`, or `undefined` until state exists. Reads the presentation once, on first render.                       |
 | `Presenter`                    | class     | What `usePresenter` is built on. Public because the adapters need it; not for you to construct, extend, or wire anything with.                       |
 | `ErrorHandler`                 | component | Mount once at the root. Props: `onWillReportError(error) => boolean`, `renderErrorDialog({ error, onClose })`, optional `onDidReportError(error)`. See [Errors](#errors). |
@@ -2433,8 +2466,8 @@ functions.
 `@magicdoor/eslint-plugin` checks what this document asks of you. `configs.recommended` covers how the
 library is used — only a use case constructs another, presentations never run one, nobody catches what `execute` never
 throws, nobody types a model as `DeepReadonly`. `configs.base` is general hygiene for any TypeScript front end, and
-`architecture()` adds the layer rules: which layer may import which, no browser APIs outside the UI, no formatting in the
-UI, private response shapes in gateways.
+`architecture()` adds the layer rules: which layer may import which, no browser APIs in use cases, presentations or
+gateways, no formatting in the UI, private response shapes in gateways.
 
 ```js
 import magicdoor, { architecture } from '@magicdoor/eslint-plugin';
@@ -2452,13 +2485,13 @@ are abstract and yours to implement.
 | Member                                    | What it does                                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `constructor(onProgress?)`                | The only constructor argument: a `(percent: number) => void` reporter, which `useUseCase` supplies. See [Progress](#progress-for-work-the-user-watches). |
-| `execute(params): Promise<void>`          | Runs `runLogic`, de-duplicated by class and parameters, compared by value. Rejects when `runLogic` throws. See [One run, not five](#one-run-not-five). |
-| `runLogic(params): Promise<void>`         | The whole of the use case. Abstract.                                                                                                 |
+| `execute(params): Promise<void>`          | Runs `runLogic`, de-duplicated by class and parameters, compared by value. Takes the use case's `TParams`, and nothing when it declares none. Rejects when `runLogic` throws. See [One run, not five](#one-run-not-five). |
+| `runLogic(params): Promise<void>`         | The whole of the use case, taking its `TParams`. Abstract.                                                                            |
 | `initializeState(): Promise<TState>`      | Called once per scope, by whichever use case runs first. Abstract — put it on one base class. See [Bootstrapping](#bootstrapping).   |
 | `getState(): TState`                      | The live state, writable only while this use case is running. Call it again after every `await`. See [Application state](#4-application-state). |
-| `detach(UseCaseClass, params?): void`     | Starts a use case nobody waits for. See [Work the caller does not wait for](#work-the-caller-does-not-wait-for).                     |
+| `detach(UseCaseClass, params): void`      | Starts a use case nobody waits for, with that use case's params — none when it declares none. See [Work the caller does not wait for](#work-the-caller-does-not-wait-for).                     |
 | `navigate(url): void`                     | Puts a url on the navigation channel; `Navigator` delivers it. See [What this buys you](#what-this-buys-you).                        |
-| `report(error): void`                     | Puts an error on the error channel without throwing, for a use case that recovers and still wants the dialog. Rare.                  |
+| `report(error): void`                     | Puts an error on the error channel without throwing, for a use case that recovers and still wants the dialog. Takes whatever a `catch` hands you; a value that is not an `Error` is wrapped in one. Rare. |
 | `resetAppState(): void`                   | Clears state, the retained copy, the in-flight map and any bootstrap; the next `execute()` bootstraps again. See [Resetting state](#resetting-state). |
 | `onProgress?`                             | The reporter passed to the constructor, for calling or handing down to a nested use case.                                            |
 
@@ -2466,11 +2499,13 @@ are abstract and yours to implement.
 
 # When something throws
 
-Every error the library itself raises starts with `[magic-use-case]`, so this is what to search for.
+The errors the library itself raises, and what each one means.
 
 | Message                                                            | Why                                                                                                                                                              |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Cannot <write> outside a use case.`                               | Something other than a running use case wrote to `getState()` — a component, a presentation, an SDK callback, a module holding a reference. Move the write into a `runLogic()`. See [Application state](#4-application-state). |
+| `Cannot <write> outside a use case.`                               | Something other than a running use case wrote to `getState()` — a component, an SDK callback, a module holding a reference. Move the write into a `runLogic()`. See [Application state](#4-application-state). |
+| `Cannot <write> on readonly object`                                | A presentation wrote to the state it was given, or a component wrote to its model. Neither is ever writable. See [The model is readonly](#the-model-is-readonly). |
+| `Cannot set 'x': the object is frozen. Replace it in state instead of changing it.` | A use case changed a frozen part of state; `Cannot delete 'x'` and `Cannot call .push() on an array` are the same refusal. Replace the branch with a new frozen value instead. A sealed object refuses new properties the same way. See [Mutate in place, or replace immutably](#mutate-in-place-or-replace-immutably--your-choice). |
 | `Resetting application state is only allowed inside a running use case.` | `resetAppState()` was reached from outside a running use case — `protected` is only a compile-time boundary. See [Resetting state](#resetting-state).        |
 | `No request scope is available.`                                   | A use case executed or a presenter was constructed on a server outside a request. React: wrap the render in `runInRequestScope()`. See [Rendering outside a request](#rendering-outside-a-request). |
 | `Application state cannot be handed to the browser.`               | State holds a class instance, and a prototype cannot cross to the browser. Keep state to plain data. See [What can cross](#what-can-cross).                      |

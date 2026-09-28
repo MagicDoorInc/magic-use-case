@@ -63,7 +63,7 @@ const USE_CASE: Policy = {
   usedWhole: recordWriteOfEverythingUnder,
   reject(action) {
     throw new Error(
-      `[magic-use-case] Cannot ${action} outside a use case.\n\n` +
+      `Cannot ${action} outside a use case.\n\n` +
         'Application state may only be mutated from within a running use case, ' +
         'so that every change emits a state-change event and reaches the UI. ' +
         'Mutating it elsewhere would leave presenters showing stale data.\n\n' +
@@ -119,7 +119,7 @@ function refused(target: object, action: string): never {
     : !Object.isExtensible(target)
       ? 'the object is sealed. Replace it in state instead of adding to it'
       : 'the property is read-only';
-  throw new Error(`[magic-use-case] Cannot ${action}: ${reason}.`);
+  throw new Error(`Cannot ${action}: ${reason}.`);
 }
 
 function collectionMutator(target: object, name: string, method: (...args: unknown[]) => unknown, policy: Policy) {

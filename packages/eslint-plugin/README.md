@@ -13,7 +13,7 @@ It ships three configs. Take the ones that fit:
 |---|---|---|
 | `configs.recommended` | How the library is used: who constructs a use case, pure presentations, `execute` never caught, no `DeepReadonly`. | Any app using magic-use-case. |
 | `configs.base` | ESLint and typescript-eslint recommended, import order and hygiene, unused imports, `name?: T` over `T \| undefined`, no `null`, no `…Dto` names, and exact assertions in tests. | Any TypeScript front end. |
-| `architecture(options)` | Everything in `recommended`, plus which layer may import which, no browser APIs outside the UI, no formatting in the UI, private response shapes in gateways, and no gateway stubs in tests. | Apps laid out in layers: use cases, presenters, gateways, state, types, UI. |
+| `architecture(options)` | Everything in `recommended`, plus which layer may import which, no browser APIs in use cases, presentations or gateways, no formatting in the UI, private response shapes in gateways, and no gateway stubs in tests. | Apps laid out in layers: use cases, presenters, gateways, state, types, UI. |
 
 ```js
 // eslint.config.js

@@ -27,7 +27,7 @@ export function currentModelFor<TState, TModel extends object>(
     // Matching what a subscribed presentation does when it throws: the screen
     // shows its empty state, and the bug is reported rather than thrown into
     // the render that happened to be first.
-    console.error('[magic-use-case] A presentation threw; its model is left empty.', error);
+    console.error('A presentation threw; its model is left empty.', error);
     return undefined;
   }
 }

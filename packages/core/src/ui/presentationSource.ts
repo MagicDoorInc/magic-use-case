@@ -60,7 +60,7 @@ export function acquireSource<TState, TModel extends object>(
           // rendering — nor the emit fanning out to every other presenter.
           // Subscribers are told the model is empty so the view can show its
           // empty state rather than keep painting a stale one.
-          console.error('[magic-use-case] A presentation threw; its model is left empty.', error);
+          console.error('A presentation threw; its model is left empty.', error);
           source.model = undefined;
           source.dependencies = undefined;
         }

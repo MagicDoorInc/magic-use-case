@@ -47,7 +47,7 @@ export function assertMutationWindowOpen(operation: string): void {
   if (isMutationWindowOpen()) return;
 
   throw new Error(
-    `[magic-use-case] ${operation} is only allowed inside a running use case.`,
+    `${operation} is only allowed inside a running use case.`,
   );
 }
 
