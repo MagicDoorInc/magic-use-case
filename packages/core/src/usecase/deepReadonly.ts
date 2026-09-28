@@ -10,6 +10,7 @@ const mutatingArrayMethods = new Set([
   'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin',
 ]);
 const iteratorKeys = new Set<string | symbol>(['values', 'entries', Symbol.iterator]);
+const identitySearchMethods = new Set(['indexOf', 'lastIndexOf', 'includes']);
 
 type AnyFunction = (...args: never[]) => unknown;
 
@@ -123,8 +124,89 @@ function collectionMutator(target: object, name: string, method: (...args: unkno
   return (...args: unknown[]) => {
     if (Array.isArray(target) && Object.isFrozen(target)) refused(target, `call .${name}() on an array`);
     recordWrite(target, WHOLE);
-    return method.apply(target, args);
+    return method.apply(target, args.map((arg) => unwrapForState(arg)));
   };
+}
+
+function collectionMethod(target: object, fn: (...args: unknown[]) => unknown, policy: Policy) {
+  return (...args: unknown[]) => wrap(fn.apply(target, args.map((arg) => toRaw(arg))), policy);
+}
+
+function identitySearch(target: object, fn: (...args: unknown[]) => unknown, policy: Policy) {
+  return (...args: unknown[]) => {
+    read(policy, target, WHOLE);
+    return fn.apply(target, [toRaw(args[0]), ...args.slice(1)]);
+  };
+}
+
+function isStorableContainer(value: object): boolean {
+  if (Array.isArray(value) || value instanceof Map || value instanceof Set) return true;
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  return prototype === Object.prototype || prototype === null;
+}
+
+function unwrapEntries<T>(entries: T[], unwrapEntry: (entry: T) => T): T[] | undefined {
+  const unwrapped = entries.map(unwrapEntry);
+  return unwrapped.some((entry, index) => entry !== entries[index]) ? unwrapped : undefined;
+}
+
+function unwrapCollection(value: Map<unknown, unknown> | Set<unknown>, seen: WeakSet<object>) {
+  if (value instanceof Map) {
+    const entries = unwrapEntries([...value.entries()], (entry): [unknown, unknown] => {
+      const [key, item] = entry;
+      const nextKey = unwrapForState(key, seen);
+      const nextItem = unwrapForState(item, seen);
+      return nextKey === key && nextItem === item ? entry : [nextKey, nextItem];
+    });
+    if (!entries) return;
+    value.clear();
+    for (const [key, item] of entries) value.set(key, item);
+    return;
+  }
+  const items = unwrapEntries([...value.values()], (item) => unwrapForState(item, seen));
+  if (!items) return;
+  value.clear();
+  for (const item of items) value.add(item);
+}
+
+function unwrapProperties<T extends object>(value: T, seen: WeakSet<object>): T {
+  const descriptors = Reflect.ownKeys(value).flatMap((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor ? [[key, descriptor] as const] : [];
+  });
+  const replacements = new Map<PropertyKey, unknown>();
+  for (const [key, descriptor] of descriptors) {
+    if (!('value' in descriptor)) continue;
+    const next = unwrapForState(descriptor.value, seen);
+    if (next !== descriptor.value) replacements.set(key, next);
+  }
+  if (replacements.size === 0) return value;
+  const writableInPlace = descriptors.every(([key, descriptor]) => !replacements.has(key) || descriptor.writable === true);
+  if (writableInPlace) {
+    for (const [key, next] of replacements) Reflect.set(value, key, next);
+    return value;
+  }
+  const copy = (Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value) as object | null)) as T;
+  for (const [key, descriptor] of descriptors) {
+    Object.defineProperty(copy, key, replacements.has(key) ? { ...descriptor, value: replacements.get(key) } : descriptor);
+  }
+  if (Object.isFrozen(value)) return Object.freeze(copy);
+  if (Object.isSealed(value)) return Object.seal(copy);
+  if (!Object.isExtensible(value)) return Object.preventExtensions(copy);
+  return copy;
+}
+
+function unwrapForState<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!isObject(value)) return value;
+  const raw = toRaw(value);
+  if (raw !== value) return raw;
+  if (seen.has(value) || !isStorableContainer(value)) return value;
+  seen.add(value);
+  if (value instanceof Map || value instanceof Set) {
+    unwrapCollection(value, seen);
+    return value;
+  }
+  return unwrapProperties(value, seen);
 }
 
 function method(target: object, fn: (...args: unknown[]) => unknown, policy: Policy) {
@@ -143,7 +225,8 @@ function wroteKey(target: object, prop: string | symbol, keysChanged: boolean) {
   if (keysChanged) recordWrite(target, KEYS);
 }
 
-function setRecorded(target: object, prop: string | symbol, value: unknown, policy: Policy): boolean {
+function setRecorded(target: object, prop: string | symbol, incoming: unknown, policy: Policy): boolean {
+  const value = unwrapForState(incoming);
   if (isAccessor(target, prop)) {
     if (!Reflect.set(target, prop, value)) refused(target, `set '${String(prop)}'`);
     policy.usedWhole(target);
@@ -163,7 +246,8 @@ function deleteRecorded(target: object, prop: string | symbol): boolean {
   return true;
 }
 
-function defineRecorded(target: object, prop: string | symbol, attributes: PropertyDescriptor): boolean {
+function defineRecorded(target: object, prop: string | symbol, incoming: PropertyDescriptor): boolean {
+  const attributes = 'value' in incoming ? { ...incoming, value: unwrapForState(incoming.value) } : incoming;
   if (!Reflect.defineProperty(target, prop, attributes)) refused(target, `define '${String(prop)}'`);
   wroteKey(target, prop, true);
   return true;
@@ -187,12 +271,22 @@ function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unkn
       }
 
       if (prop === 'get') {
-        return (key: unknown) => wrap(target.get(key), policy);
+        return (key: unknown) => wrap(target.get(toRaw(key)), policy);
+      }
+
+      if (prop === 'has') {
+        return (key: unknown) => target.has(toRaw(key));
       }
 
       if (prop === 'forEach') {
         return (cb: (value: unknown, key: unknown, map: Map<unknown, unknown>) => void) =>
-          target.forEach((v, k) => cb(wrap(v, policy), k, receiver));
+          target.forEach((v, k) => cb(wrap(v, policy), wrap(k, policy), receiver));
+      }
+
+      if (prop === 'keys') {
+        return function* () {
+          for (const k of target.keys()) yield wrap(k, policy);
+        };
       }
 
       if (iteratorKeys.has(prop)) {
@@ -200,14 +294,14 @@ function createMapProxy(target: Map<unknown, unknown>, policy: Policy): Map<unkn
           if (prop === 'values') {
             for (const v of target.values()) yield wrap(v, policy);
           } else {
-            for (const [k, v] of target.entries()) yield [k, wrap(v, policy)];
+            for (const [k, v] of target.entries()) yield [wrap(k, policy), wrap(v, policy)];
           }
         };
       }
 
       const value = Reflect.get(target, prop, target);
       if (prop === 'constructor' || typeof value !== 'function') return value;
-      return value.bind(target);
+      return collectionMethod(target, value as (...args: unknown[]) => unknown, policy);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
@@ -237,7 +331,17 @@ function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
         return collectionMutator(target, prop, method);
       }
 
-      if (iteratorKeys.has(prop)) {
+      if (prop === 'has') {
+        return (value: unknown) => target.has(toRaw(value));
+      }
+
+      if (prop === 'entries') {
+        return function* () {
+          for (const v of target.values()) yield [wrap(v, policy), wrap(v, policy)];
+        };
+      }
+
+      if (iteratorKeys.has(prop) || prop === 'keys') {
         return function* () {
           for (const v of target.values()) yield wrap(v, policy);
         };
@@ -250,7 +354,7 @@ function createSetProxy(target: Set<unknown>, policy: Policy): Set<unknown> {
 
       const value = Reflect.get(target, prop, target);
       if (prop === 'constructor' || typeof value !== 'function') return value;
-      return value.bind(target);
+      return collectionMethod(target, value as (...args: unknown[]) => unknown, policy);
     },
     set(target, prop, value) {
       if (!policy.allows()) policy.reject(`set property '${String(prop)}'`);
@@ -288,7 +392,10 @@ function createObjectProxy(target: object, policy: Policy): object {
       if (mustReturnRaw(target, prop)) return value;
       if (typeof value === 'function') {
         if (prop === 'constructor') return value;
-        if (Array.isArray(target)) return value.bind(policy.tracksReads ? receiver : target);
+        if (Array.isArray(target) && typeof prop === 'string' && identitySearchMethods.has(prop)) {
+          return identitySearch(target, value as (...args: unknown[]) => unknown, policy);
+        }
+        if (Array.isArray(target)) return value.bind(receiver);
         return method(target, value as (...args: unknown[]) => unknown, policy);
       }
       if (!isObject(value)) return value;
