@@ -1,7 +1,7 @@
 {
-  "name": "@magicdoor/eslint-plugin-magic-use-case",
+  "name": "@magicdoor/eslint-plugin",
   "version": "0.2.0",
-  "description": "ESLint rules for magic-use-case — keep use cases, presentations and the UI in their lanes.",
+  "description": "ESLint rules and configs for TypeScript front ends: hygiene for any app, layer boundaries for layered ones, and the rules magic-use-case relies on.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,12 +29,18 @@
     "eslint": ">=9.0.0"
   },
   "dependencies": {
-    "@typescript-eslint/utils": "^8.0.0"
+    "@eslint/js": "^9.39.5",
+    "@typescript-eslint/utils": "^8.70.1",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-unicorn": "^60.0.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "typescript-eslint": "^8.70.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@typescript-eslint/parser": "^8.0.0",
-    "@typescript-eslint/rule-tester": "^8.70.0"
+    "@typescript-eslint/parser": "^8.70.1",
+    "@typescript-eslint/rule-tester": "^8.70.1"
   },
   "keywords": [
     "eslint",

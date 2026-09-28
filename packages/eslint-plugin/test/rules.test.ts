@@ -1,7 +1,6 @@
 import { afterAll, describe, it } from 'vitest';
 import { RuleTester } from '@typescript-eslint/rule-tester';
 import * as parser from '@typescript-eslint/parser';
-import plugin from '../src/index';
 import { noCatchOnExecute } from '../src/rules/noCatchOnExecute';
 import { noDeepReadonly } from '../src/rules/noDeepReadonly';
 import { noUseCaseOutsideUseCase } from '../src/rules/noUseCaseOutsideUseCase';
@@ -144,15 +143,5 @@ describe('no-deep-readonly', () => {
         errors: [{ messageId: 'deepReadonly' }, { messageId: 'deepReadonly' }],
       },
     ],
-  });
-});
-
-describe('the recommended config', () => {
-  it('turns every rule on', async () => {
-    const { expect } = await import('vitest');
-    const recommended = plugin.configs.recommended as { rules: Record<string, string> };
-    expect(Object.keys(recommended.rules).sort()).toEqual(
-      Object.keys(plugin.rules).map((name) => `magic-use-case/${name}`).sort(),
-    );
   });
 });

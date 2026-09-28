@@ -2430,16 +2430,19 @@ functions.
 
 ## Lint rules
 
-`@magicdoor/eslint-plugin-magic-use-case` checks the rules this document relies on: only a use case constructs another,
-presentations never run one, nobody catches what `execute` never throws, and nobody types a model as `DeepReadonly`.
+`@magicdoor/eslint-plugin` checks what this document asks of you. `configs.recommended` covers how the
+library is used — only a use case constructs another, presentations never run one, nobody catches what `execute` never
+throws, nobody types a model as `DeepReadonly`. `configs.base` is general hygiene for any TypeScript front end, and
+`architecture()` adds the layer rules: which layer may import which, no browser APIs outside the UI, no formatting in the
+UI, private response shapes in gateways.
 
 ```js
-import magicUseCase from '@magicdoor/eslint-plugin-magic-use-case';
+import magicdoor, { architecture } from '@magicdoor/eslint-plugin';
 
-export default [{ files: ['src/**/*.{ts,tsx}'], ...magicUseCase.configs.recommended }];
+export default [...magicdoor.configs.base, ...architecture({ folders: { ui: ['components', 'routes'] } })];
 ```
 
-See [its README](packages/eslint-plugin/README.md) for each rule.
+See [its README](packages/eslint-plugin/README.md) for each rule and the options.
 
 ## What a use case can do
 
