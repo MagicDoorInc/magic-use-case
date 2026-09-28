@@ -41,7 +41,7 @@
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "peerDependencies": {
     "solid-js": ">1.9.3"

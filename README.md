@@ -18,7 +18,7 @@ left to review.
 npm install @magicdoor/magic-use-case-react   # or @magicdoor/magic-use-case-solid
 ```
 
-Requires Node ≥18. The two adapters share one core and behave identically. The examples below are React; in Solid the
+Requires Node ≥20. The two adapters share one core and behave identically. The examples below are React; in Solid the
 only differences are the import, the JSX, and that what the hooks return are accessors — `model()` and `isLoading()`
 rather than `model` and `isLoading`.
 

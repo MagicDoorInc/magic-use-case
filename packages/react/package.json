@@ -35,7 +35,7 @@
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "peerDependencies": {
     "react": ">=17.0.0"

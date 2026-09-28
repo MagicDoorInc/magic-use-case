@@ -8,12 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # The published packages declare `engines: node >=18`, so that is what gets
+    # The published packages declare `engines: node >=20`, so that is what gets
     # tested. 24 is what the runners use by default.
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 24]
+        node: [20, 24]
     name: build (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@v4

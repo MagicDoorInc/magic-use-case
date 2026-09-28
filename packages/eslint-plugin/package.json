@@ -23,7 +23,7 @@
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.10"
   },
   "peerDependencies": {
     "eslint": ">=9.0.0"

@@ -45,6 +45,6 @@
   },
   "author": "Norbert Nemes",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }
