@@ -51,6 +51,8 @@ describe('pure-presentations', () => {
       `export const presentLeases = (state: MainAppState) => ({ names: state.leases.map((lease) => lease.name) });`,
       `export function presentChat(state: MainAppState) { return { title: state.chat.title }; }`,
       `const Screen = () => { const { execute } = useUseCase(PayUseCase); return execute; };`,
+      `export default function () { const { execute } = useUseCase(PayUseCase); return <button onClick={() => execute()} />; }`,
+      `export const presentLease = (lease: Lease) => ({ startsOn: new Date(lease.startsOn) });`,
     ],
     invalid: [
       {
@@ -81,6 +83,11 @@ describe('no-catch-on-execute', () => {
         const run = async () => { try { await load(); } finally { setBusy(false); } };
       };`,
       `const parse = () => { try { return JSON.parse(text); } catch { return undefined; } };`,
+      `const Upload = () => {
+        const { execute: save, isLoading } = useUseCase(SaveUploadUseCase);
+        upload.catch(() => setFailed(true));
+        return isLoading ? null : save;
+      };`,
       `const Pinata = () => {
         const { execute: mint } = useUseCase(MintTokenUseCase);
         const open = async () => {

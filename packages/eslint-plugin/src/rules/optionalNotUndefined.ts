@@ -5,20 +5,18 @@ type Holder = TSESTree.TSPropertySignature | TSESTree.PropertyDefinition | TSEST
 
 function holderOf(union: TSESTree.TSUnionType): Holder | undefined {
   const annotation = union.parent;
-  if (annotation?.type !== AST_NODE_TYPES.TSTypeAnnotation) return undefined;
+  if (annotation.type !== AST_NODE_TYPES.TSTypeAnnotation) return undefined;
   const holder = annotation.parent;
-  if (!holder) return undefined;
   if (holder.type === AST_NODE_TYPES.TSPropertySignature || holder.type === AST_NODE_TYPES.PropertyDefinition) return holder;
   if (holder.type !== AST_NODE_TYPES.Identifier) return undefined;
   const owner = holder.parent;
-  if (!owner) return undefined;
   if (
     isFunction(owner) ||
     owner.type === AST_NODE_TYPES.TSParameterProperty ||
     owner.type === AST_NODE_TYPES.TSFunctionType ||
     owner.type === AST_NODE_TYPES.TSMethodSignature ||
     owner.type === AST_NODE_TYPES.TSDeclareFunction ||
-    (owner.type === AST_NODE_TYPES.AssignmentPattern && owner.parent !== undefined && isFunction(owner.parent))
+    (owner.type === AST_NODE_TYPES.AssignmentPattern && isFunction(owner.parent))
   ) {
     return holder;
   }
@@ -42,7 +40,7 @@ export const optionalNotUndefined = createRule({
     return {
       TSUndefinedKeyword(node) {
         const union = node.parent;
-        if (union?.type !== AST_NODE_TYPES.TSUnionType) return;
+        if (union.type !== AST_NODE_TYPES.TSUnionType) return;
         const holder = holderOf(union);
         if (!holder) return;
         const fixable =

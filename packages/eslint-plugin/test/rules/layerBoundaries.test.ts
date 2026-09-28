@@ -22,6 +22,9 @@ describe('layer-boundaries', () => {
       { filename: gateway, code: `import { LeaseStatus } from '~/use-cases/types/LeaseStatus'; import { Lease } from '../types/Lease';` },
       { filename: fileIn('tools/script.ts'), code: `import { leaseGateway } from '~/gateways/leaseGateway';` },
       { filename: component, code: `import { Button } from '@acme/ui/components';` },
+      { filename: component, code: `import { formatDay } from '~/utils/date';` },
+      { filename: component, code: `import { queryClient } from '..';` },
+      { filename: types, code: `import { LeaseStatus } from './LeaseStatus';` },
     ],
     invalid: [
       { filename: component, code: `import { leaseGateway } from '~/gateways/leaseGateway';`, errors: [{ messageId: 'uiToGateway' }] },
@@ -36,6 +39,8 @@ describe('layer-boundaries', () => {
       { filename: gateway, code: `import { GetLeasesUseCase } from '~/use-cases/getLeasesUseCase';`, errors: [{ messageId: 'gatewayToUseCase' }] },
       { filename: gateway, code: `import { presentLeases } from '~/presenters/LeasePresenter';`, errors: [{ messageId: 'gatewayToUi' }] },
       { filename: types, code: `export { leaseGateway } from '~/gateways/leaseGateway';`, errors: [{ messageId: 'typesToOuter' }] },
+      { filename: types, code: `export * from '~/presenters/LeasePresenter';`, errors: [{ messageId: 'typesToOuter' }] },
+      { filename: component, code: `const loadPresenter = () => import('~/presenters/LeasePresenter');`, errors: [{ messageId: 'uiToPresenter' }] },
       {
         filename: fileIn('src/screens/Leases.tsx'),
         settings: { '@magicdoor': { layers: { src: 'src', aliases: ['~/'], folders: { useCases: ['use-cases'], presenters: ['presenters'], gateways: ['gateways'], state: ['state'], types: ['types'], ui: ['screens'] } } } },

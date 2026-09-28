@@ -25,6 +25,12 @@ describe('no-browser-globals', () => {
         code: `localStorage.setItem('seen', 'yes');`,
         errors: [{ messageId: 'storage', data: { name: 'localStorage' } }],
       },
+      {
+        filename: fileIn('src/gateways/sessionGateway.ts'),
+        languageOptions: { globals: { window: 'readonly', sessionStorage: 'readonly' } },
+        code: `export const token = () => sessionStorage.getItem('token') ?? window.name;`,
+        errors: [{ messageId: 'storage', data: { name: 'sessionStorage' } }, { messageId: 'browser', data: { name: 'window' } }],
+      },
     ],
   });
 });

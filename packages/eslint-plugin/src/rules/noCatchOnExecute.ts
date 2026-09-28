@@ -50,12 +50,11 @@ export const noCatchOnExecute = createRule({
         if (!isUseUseCaseCall(node.init)) return;
         if (node.id.type === AST_NODE_TYPES.Identifier) {
           hooks.add(node.id.name);
-          return;
-        }
-        if (node.id.type !== AST_NODE_TYPES.ObjectPattern) return;
-        for (const property of node.id.properties) {
-          if (property.type !== AST_NODE_TYPES.Property || nameOf(property.key) !== 'execute') continue;
-          if (property.value.type === AST_NODE_TYPES.Identifier) executes.add(property.value.name);
+        } else if (node.id.type === AST_NODE_TYPES.ObjectPattern) {
+          for (const property of node.id.properties) {
+            if (property.type !== AST_NODE_TYPES.Property || nameOf(property.key) !== 'execute') continue;
+            if (property.value.type === AST_NODE_TYPES.Identifier) executes.add(property.value.name);
+          }
         }
       },
       CallExpression(node) {

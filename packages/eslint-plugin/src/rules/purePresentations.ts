@@ -4,8 +4,7 @@ import { createRule, isFunction, nameOf, USE_CASE_NAME } from '../createRule';
 const PRESENTATION_NAME = /^present[A-Z0-9_]/;
 const RUNNERS = new Set(['execute', 'useUseCase', 'usePresenter', 'createUseCase']);
 
-function declaresPresentationType(id: TSESTree.Node): boolean {
-  if (id.type !== AST_NODE_TYPES.Identifier) return false;
+function declaresPresentationType(id: TSESTree.Identifier): boolean {
   const annotation = id.typeAnnotation?.typeAnnotation;
   return annotation?.type === AST_NODE_TYPES.TSTypeReference && nameOf(annotation.typeName) === 'Presentation';
 }
@@ -14,8 +13,11 @@ function isPresentation(node: TSESTree.Node): boolean {
   if (!isFunction(node)) return false;
   if (node.type === AST_NODE_TYPES.FunctionDeclaration) return PRESENTATION_NAME.test(node.id?.name ?? '');
   const parent = node.parent;
-  if (parent?.type !== AST_NODE_TYPES.VariableDeclarator) return false;
-  return PRESENTATION_NAME.test(nameOf(parent.id) ?? '') || declaresPresentationType(parent.id);
+  return (
+    parent.type === AST_NODE_TYPES.VariableDeclarator &&
+    parent.id.type === AST_NODE_TYPES.Identifier &&
+    (PRESENTATION_NAME.test(parent.id.name) || declaresPresentationType(parent.id))
+  );
 }
 
 function insidePresentation(node: TSESTree.Node): boolean {

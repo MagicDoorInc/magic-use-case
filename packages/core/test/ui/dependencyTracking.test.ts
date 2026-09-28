@@ -23,7 +23,22 @@ class Person {
   }
 }
 
+class Inventory {
+  items = new Map<string, { count: number }>();
+  shelf: { count: number }[];
+  constructor(apple: { count: number }) {
+    this.items.set('apple', apple);
+    this.shelf = [apple];
+  }
+  restock(id: string) {
+    const item = this.items.get(id);
+    if (item) item.count += 1;
+  }
+}
+
 class AppState {
+  pinned = { count: 1 };
+  inventory = new Inventory(this.pinned);
   person = new Person();
   form = { description: '' };
   chats = [
@@ -123,6 +138,29 @@ describe('a presentation re-runs only when something it read changed', () => {
     expect(has.model).toEqual({ hasB: true });
   });
 
+  it('skips a presentation when only another field of an object it read changes', async () => {
+    await started();
+    const title = watch((state) => ({ title: state.chats[0]!.title }));
+
+    await change((state) => {
+      state.chats[0]!.unread = 5;
+    });
+
+    expect(title.runs).toBe(1);
+    expect(title.model).toEqual({ title: 'A' });
+  });
+
+  it('re-runs when an element of an array it read is replaced', async () => {
+    await started();
+    const second = watch((state) => ({ title: state.chats[1]?.title }));
+
+    await change((state) => {
+      state.chats[1] = { id: 'c', title: 'C', unread: 0 };
+    });
+
+    expect(second.model).toEqual({ title: 'C' });
+  });
+
   it('re-runs for any change to a map it read', async () => {
     await started();
     const label = watch((state) => ({ a: state.labels.get('a') }));
@@ -144,6 +182,19 @@ describe('a presentation re-runs only when something it read changed', () => {
     });
 
     expect(cart.model).toEqual({ count: 1 });
+    expect(form.runs).toBe(1);
+  });
+
+  it('re-runs when a method changes an object it read elsewhere that the method reached through a map', async () => {
+    await started();
+    const pinned = watch((state) => ({ count: state.pinned.count }));
+    const form = watch((state) => ({ description: state.form.description }));
+
+    await change((state) => {
+      state.inventory.restock('apple');
+    });
+
+    expect(pinned.model).toEqual({ count: 2 });
     expect(form.runs).toBe(1);
   });
 
@@ -235,5 +286,32 @@ describe('a presentation re-runs only when something it read changed', () => {
     });
 
     expect(flaky.model).toEqual({ description: '' });
+  });
+
+  it('re-runs for the run that bootstrapped state, even after catching up on that state early', async () => {
+    let reached!: () => void;
+    const running = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    class Bootstrap extends Base {
+      protected async runLogic() {
+        reached();
+        await gate;
+      }
+    }
+
+    const bootstrapping = createUseCase(Bootstrap).execute();
+    await running;
+    const form = watch((state) => ({ description: state.form.description }));
+    expect(form.runs).toBe(1);
+
+    finish();
+    await bootstrapping;
+
+    expect(form.runs).toBe(2);
   });
 });

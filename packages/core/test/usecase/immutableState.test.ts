@@ -117,6 +117,41 @@ describe('immutable state patterns', () => {
     await expect(new Add().execute()).rejects.toThrow('Cannot call .push() on an array: the object is frozen');
   });
 
+  it('explains a write a sealed object or a getter-only property refuses', async () => {
+    class Profile {
+      first = 'Ann';
+      get initial() {
+        return this.first[0];
+      }
+    }
+    class AppState {
+      settings = Object.seal({ theme: 'dark' });
+      profile = new Profile();
+    }
+    class Add extends UseCase<AppState> {
+      protected async initializeState() {
+        return new AppState();
+      }
+      protected async runLogic() {
+        (this.getState().settings as { accent?: string }).accent = 'blue';
+      }
+    }
+    class Define extends Add {
+      protected async runLogic() {
+        Object.defineProperty(this.getState().settings, 'accent', { value: 'blue' });
+      }
+    }
+    class Rename extends Add {
+      protected async runLogic() {
+        (this.getState().profile as { initial: string }).initial = 'B';
+      }
+    }
+
+    await expect(new Add().execute()).rejects.toThrow("Cannot set 'accent': the object is sealed");
+    await expect(new Define().execute()).rejects.toThrow("Cannot define 'accent': the object is sealed");
+    await expect(new Rename().execute()).rejects.toThrow("Cannot set 'initial': the property is read-only");
+  });
+
   it('still refuses a branch replacement made outside a use case', async () => {
 
     class AppState {

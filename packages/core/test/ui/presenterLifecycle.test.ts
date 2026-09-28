@@ -79,6 +79,25 @@ describe('a presenter built from a presentation', () => {
     expect(seen).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
   });
 
+  it('stops delivering to a listener that unsubscribed, and keeps delivering to the rest', async () => {
+    const core = load();
+    const state = new AppState();
+    await bump(core, state);
+
+    const presenter = new core.Presenter(countPresentation);
+    const leaving: unknown[] = [];
+    const staying: unknown[] = [];
+    const leave = (m: unknown) => leaving.push(m);
+    presenter.subscribe(leave);
+    presenter.subscribe((m) => staying.push(m));
+
+    presenter.unsubscribe(leave);
+    await bump(core, state);
+
+    expect(leaving).toEqual([{ n: 1 }]);
+    expect(staying).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+
   it('shares one presentation between independent presenters', async () => {
     const core = load();
     const state = new AppState();
