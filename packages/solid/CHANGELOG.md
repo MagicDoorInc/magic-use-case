@@ -1,5 +1,17 @@
 # @magicdoor/magic-use-case-solid
 
+## 0.3.1
+
+### Patch Changes
+
+- **A write to an element reached through an array method now reaches presenters.** Inside a use case, `find`, `filter`, `map`, `forEach`, `for…of`, spread and the other array methods handed back the raw elements, so `state.rows.find((row) => row.id === id)!.amount = 10` changed state without any presenter re-running. They now hand back the same writable view as indexing does.
+
+  **`indexOf`, `lastIndexOf` and `includes` find an element read from state.** Searching an array for an element read through `getState()` or a presentation returned `-1` or `false`; it now matches whether the element is a view or the raw object.
+
+  **State stores objects, not views of them.** Assigning, pushing, splicing, filling, `Map.set`, `Set.add` and `defineProperty` stored the view they were handed, so `state.selected = state.rows[0]` left `state.selected` a different object from the row. The object itself is now stored, including inside a new array, object, `Map` or `Set` built from state. A frozen, sealed or non-extensible container is copied only when a read-only slot has to change, and keeps its integrity level.
+
+  **Maps and Sets keyed by objects from state.** `get`, `has` and `delete` find a key read from state, `keys()` and `forEach` hand out keys as views, `Set.prototype.entries()` yields `[value, value]` pairs, and what `union`, `intersection` and the other `Set` and `Map` methods return is wrapped like everything else.
+
 ## 0.3.0
 
 ### Minor Changes
