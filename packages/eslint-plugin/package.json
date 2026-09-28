@@ -1,6 +1,6 @@
 {
   "name": "@magicdoor/eslint-plugin",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "description": "ESLint rules and configs for TypeScript front ends: hygiene for any app, layer boundaries for layered ones, and the rules magic-use-case relies on.",
   "type": "module",
   "main": "./dist/index.js",
