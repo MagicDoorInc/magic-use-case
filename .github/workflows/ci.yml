@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # The published packages declare `engines: node >=20`, so that is what gets
     # tested. 24 is what the runners use by default.
     strategy:
